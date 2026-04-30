@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ImgsToPDFCore": {
+      "commandName": "Project",
+      "commandLineArgs": "-d \"E:\\Temp\" -l 1 -f"
+    }
+  }
+}

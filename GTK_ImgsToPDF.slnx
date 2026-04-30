@@ -5,4 +5,7 @@
   <Project Path="GTK_ImgsToPDF/GTK_ImgsToPDF.csproj">
     <Platform Project="x64" />
   </Project>
+  <Project Path="ImgsToPDFCore/ImgsToPDFCore.csproj">
+    <Platform Project="x64" />
+  </Project>
 </Solution>

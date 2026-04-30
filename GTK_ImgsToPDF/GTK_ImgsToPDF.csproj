@@ -11,6 +11,25 @@
     <ApplicationIcon>pimejaSike.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Message Text="正在复制 Core 资源文件..." Importance="high" />
+    <ItemGroup>
+      <SourceAssets Include="$(ProjectDir)Core\**\*.*" />
+    </ItemGroup>
+    <Copy 
+      SourceFiles="@(SourceAssets)" 
+      DestinationFiles="$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)" 
+      SkipUnchangedFiles="true" 
+      OverwriteReadOnlyFiles="true" />
+      <!-- SkipUnchangedFiles 对应增量更新，OverwriteReadOnlyFiles 对应 /R -->
+  </Target>
+
+  <ItemGroup>
+    <Compile Remove="Core\**" />
+    <EmbeddedResource Remove="Core\**" />
+    <None Remove="Core\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <Content Include="pimejaSike.ico" />
   </ItemGroup>

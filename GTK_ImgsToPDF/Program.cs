@@ -4,6 +4,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace GTK_ImgsToPDF {
@@ -30,7 +31,7 @@ namespace GTK_ImgsToPDF {
             this.DeleteEvent += (s, e) => Application.Quit();
 
             // 主布局：垂直盒子
-            VBox mainBox = new VBox(false, 0);
+            Box mainBox = new Box(Orientation.Vertical, spacing: 0) { Homogeneous = false };
             Add(mainBox);
 
             // 1. 菜单栏
@@ -45,7 +46,7 @@ namespace GTK_ImgsToPDF {
             ShowAll();
 
             // 初始状态下隐藏叠加的小图标
-            _smallFolderIcon.Hide();
+            _smallFolderIcon?.Hide();
         }
 
         private MenuBar CreateMenuBar() {
@@ -73,13 +74,14 @@ namespace GTK_ImgsToPDF {
 
             MenuItem configFileItem = new MenuItem("配置文件(C)");
             configFileItem.Activated += (s, e) => {
-                if (!File.Exists(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua"))) {
+                string cfgFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua");
+                if (!File.Exists(cfgFilePath)) {
                     MsgBox.Show(this, "配置文件不存在！");
                     return;
                 }
                 Process.Start(
                     new ProcessStartInfo(
-                        System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua")
+                        cfgFilePath
                         ) { UseShellExecute = true }
                 );
             };
@@ -107,7 +109,7 @@ namespace GTK_ImgsToPDF {
             _dropTarget.Add(_overlay);
 
             // --- 底层：垂直内容布局 ---
-            VBox contentBox = new VBox(false, 10);
+            Box contentBox = new Box(Orientation.Vertical, spacing: 10) { Homogeneous = false };
             contentBox.Valign = Align.Center;
 
             // 初始状态：显示大文件夹图标
@@ -117,7 +119,7 @@ namespace GTK_ImgsToPDF {
             //_mainImage.PixelSize = 128;
 
             _hintLabel = new Label("拖入包含图片的文件夹");
-            _hintLabel.ModifyFg(StateType.Normal, new Color(0, 0, 255)); // 蓝色文字
+            SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
 
             _pathLabel = new Label("等待拖入..."); // 初始状态
             _pathLabel.MarginTop = 10;
@@ -137,7 +139,7 @@ namespace GTK_ImgsToPDF {
             _smallFolderIcon.Halign = Align.Start;
             _smallFolderIcon.Valign = Align.End;
             // 设置边距，防止紧贴边缘
-            _smallFolderIcon.MarginLeft = 10;
+            _smallFolderIcon.MarginStart = 10;
             _smallFolderIcon.MarginBottom = 10;
 
             _overlay.AddOverlay(_smallFolderIcon);
@@ -158,9 +160,9 @@ namespace GTK_ImgsToPDF {
 
         private Widget CreateBottomControls() {
             // 底部控制栏布局 (与前一个代码示例类似，增加了进度条)
-            VBox bottomBox = new VBox(false, 10);
-            bottomBox.MarginLeft = 20;
-            bottomBox.MarginRight = 20;
+            Box bottomBox = new Box(Orientation.Vertical, spacing: 10) { Homogeneous = false };
+            bottomBox.MarginStart = 20;
+            bottomBox.MarginEnd = 20;
             bottomBox.MarginBottom = 10;
 
             // 1. 创建 CheckButton 实例并保留引用
@@ -182,13 +184,13 @@ namespace GTK_ImgsToPDF {
             };
 
             // 4. 将它们添加到布局中
-            HBox checkBoxes = new HBox(true, 10);
+            Box checkBoxes = new Box(Orientation.Horizontal, spacing: 10) { Homogeneous = true };
             checkBoxes.PackStart(_lossyCheck, false, false, 0);
             checkBoxes.PackStart(_recursiveCheck, false, false, 0);
             checkBoxes.PackStart(_mergeCheck, false, false, 0);
             bottomBox.PackStart(checkBoxes, false, false, 0);
 
-            HBox actionBox = new HBox(false, 10);
+            Box actionBox = new Box(Orientation.Horizontal, spacing: 10) { Homogeneous = false };
             actionBox.PackStart(new Label("PDF输出版式："), false, false, 0);
             _layoutCombo = new ComboBoxText();
             _layoutCombo.AppendText("单页");
@@ -323,17 +325,17 @@ namespace GTK_ImgsToPDF {
         // 处理拖拽接收事件
         private void OnDragDataReceived(object o, DragDataReceivedArgs args) {
             // 检查数据类型是否正确
-            if (args.Info != 0) return;
+            if (args.Info != 0) { args.RetVal = true; return; }
 
             // 获取拖拽的文件 URI 列表 (file://...)
             string[] uris = args.SelectionData.Uris;
-            if (uris == null || uris.Length == 0) return;
+            if (uris == null || uris.Length == 0) { args.RetVal = true; return; }
 
             // 获取第一个 URI 并转换为本地路径
             string firstUri = uris[0];
             Uri fileUri = new Uri(firstUri);
 
-            if (!fileUri.IsFile) return;
+            if (!fileUri.IsFile) { args.RetVal = true; return; }
 
             string folderPath = fileUri.LocalPath;
 
@@ -348,7 +350,7 @@ namespace GTK_ImgsToPDF {
             args.RetVal = true; // 表示事件已处理
         }
         private void SelectFolder() {
-            string selectedPath = null;
+            string? selectedPath = null;
 
             // 1. 创建文件夹选择对话框
             // 参数：标题, 父窗口, 模式 (SelectFolder), 按钮及其返回码
@@ -367,6 +369,11 @@ namespace GTK_ImgsToPDF {
 
                 // 4. 显式销毁对话框
                 dialog.Destroy();
+            }
+
+            // 如果用户取消或未选择，直接返回，避免对 null 调用 Directory.Exists
+            if (string.IsNullOrEmpty(selectedPath)) {
+                return;
             }
 
             // 检查拖入的是否为文件夹
@@ -410,7 +417,7 @@ namespace GTK_ImgsToPDF {
                     _mainImage.PixelSize = -1; // 取消固定像素大小，使用图片实际大小
 
                     // 更改提示文字颜色
-                    _hintLabel.ModifyFg(StateType.Normal, new Color(138, 43, 226)); // 紫色文字
+                    SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
                     _hintLabel.Text = "点击开始按钮开始PDF文件生成";
 
                     // **核心功能：显示叠加的小图标**
@@ -435,7 +442,7 @@ namespace GTK_ImgsToPDF {
             _mainImage.Stock = Stock.Directory;
             _mainImage.IconSize = (int)IconSize.Dialog;
             //_mainImage.PixelSize = 128;
-            _hintLabel.ModifyFg(StateType.Normal, new Color(0, 0, 255));
+            SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = "拖入包含图片的文件夹";
             _smallFolderIcon.Hide();
 
@@ -447,24 +454,33 @@ namespace GTK_ImgsToPDF {
         private void OnAboutClicked(object? sender, EventArgs e) {
             // 获取程序集信息
             var assembly = System.Reflection.Assembly.GetExecutingAssembly();
-            var version = assembly.GetName().Version;
-            var copyright = ((System.Reflection.AssemblyCopyrightAttribute)assembly
-                .GetCustomAttributes(typeof(System.Reflection.AssemblyCopyrightAttribute), false)[0]).Copyright;
+            var versionStr = assembly.GetName().Version?.ToString() ?? "Unknown";
+            var copyrightAttr = assembly
+                .GetCustomAttributes(typeof(System.Reflection.AssemblyCopyrightAttribute), false)
+                .OfType<AssemblyCopyrightAttribute>()
+                .FirstOrDefault();
+            var copyright = copyrightAttr?.Copyright ?? string.Empty;
 
             // 创建对话框
             AboutDialog ad = new AboutDialog();
             ad.Logo = GetAppIcon();
             ad.ProgramName = "ImagesToPDF";
-            ad.Version = version.ToString();
-            ad.Copyright = copyright.ToString();
+            ad.Version = versionStr;
+            ad.Copyright = copyright;
             ad.Website = "https://github.com/Sinryou/ImagesToPDF";
-            ad.License = "By MIT License\n\n" + copyright.ToString();
+            ad.License = "By MIT License\n\n" + copyright;
             ad.TransientFor = this; // 设置父窗口
 
             ad.Run();
             ad.Destroy();
         }
-        public Pixbuf GetAppIcon(int targetWidth = 64, int targetHeight = 64) {
+        private static void SetLabelColor(Label label, byte r, byte g, byte b) {
+            var cssProvider = new CssProvider();
+            cssProvider.LoadFromData($"label {{ color: rgb({r},{g},{b}); }}");
+            label.StyleContext.AddProvider(cssProvider, Gtk.StyleProviderPriority.User);
+        }
+
+        private static Pixbuf? GetAppIcon(int targetWidth = 64, int targetHeight = 64) {
             // 1. 从资源类获取字节数组
             byte[] iconBytes = Properties.Resources.appIcon;
 

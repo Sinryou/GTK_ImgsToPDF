@@ -9,13 +9,15 @@
     <Product>ImgsToPDFCore</Product>
     <Platforms>AnyCPU;x64</Platforms>
     <Copyright>Copyright © 2022-2026 Sinryou.</Copyright>
-    <ApplicationVersion>1.0.0.%2a</ApplicationVersion>
-    <AssemblyVersion>1.1.1</AssemblyVersion>
-    <FileVersion>1.1.1</FileVersion>
     <ImplicitUsings>enable</ImplicitUsings>
+    <PublishProtocol>FileSystem</PublishProtocol>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>True</PublishSingleFile>
+    <PublishTrimmed>True</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
   </PropertyGroup>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(SolutionDir)' != '' and '$(SolutionDir)' != '*Undefined*'">
     <Message Text="正在同步 Core 组件..." Importance="high" />
     <ItemGroup>
       <CoreFiles Include="$(TargetDir)**\*.*" />

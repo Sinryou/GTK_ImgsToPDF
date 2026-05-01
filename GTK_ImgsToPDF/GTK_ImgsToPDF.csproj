@@ -9,6 +9,11 @@
     <Platforms>AnyCPU;x64</Platforms>
     <Copyright>Copyright © 2026 Sinryou.</Copyright>
     <ApplicationIcon>pimejaSike.ico</ApplicationIcon>
+    <PublishProtocol>FileSystem</PublishProtocol>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>True</PublishSingleFile>
+    <PublishTrimmed>True</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
@@ -21,7 +26,6 @@
       DestinationFiles="$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)" 
       SkipUnchangedFiles="true" 
       OverwriteReadOnlyFiles="true" />
-      <!-- SkipUnchangedFiles 对应增量更新，OverwriteReadOnlyFiles 对应 /R -->
   </Target>
 
   <ItemGroup>

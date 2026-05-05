@@ -4,6 +4,7 @@ local common = require("Modules.Common")
 local pathUtil = require("Modules.PathUtil")
 local unicode = require("Modules.unicode")
 local osUtil = require("Modules.OSUtil")
+local visualGTK = require("Modules.VisualGTK")
 local u2a = unicode.u2a
 local a2u = unicode.a2u
 
@@ -11,7 +12,6 @@ local iPageSize = CS.iTextSharp.text.PageSize
 local iRectangle = CS.iTextSharp.text.Rectangle
 local commonUtils = CS.ImgsToPDFCore.CommonUtils
 local PDFWrapper = CS.ImgsToPDFCore.PDFWrapper
-local interaction = CS.Microsoft.VisualBasic.Interaction
 
 -- add your local funcs below
 -- 建议在这个部分添加你自己要用到的函数
@@ -141,7 +141,7 @@ function Config:PreProcess(...)
     outputDir = pathUtil.dirPath(path)
     tempExtraPath = path:sub(1, -(1 + #pathUtil.getExtension(path))) .. os.date("%Y%m%d%H%M%S")
     if not commonUtils.Decompress(path, tempExtraPath) then
-        local password = interaction.InputBox("Input password:", "Encrypted Compress File")
+        local password = visualGTK.InputBox("Input password:", "Encrypted Compress File")
         if common.isEmpty(password) or not commonUtils.Decompress(path, tempExtraPath, password) then
             return
         end

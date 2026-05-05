@@ -22,11 +22,7 @@
     <ItemGroup>
       <CoreFiles Include="$(TargetDir)**\*.*" />
     </ItemGroup>
-    <Copy
-      SourceFiles="@(CoreFiles)"
-      DestinationFiles="$(SolutionDir)GTK_ImgsToPDF\Core\%(RecursiveDir)%(Filename)%(Extension)"
-      SkipUnchangedFiles="true"
-      OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(CoreFiles)" DestinationFiles="$(SolutionDir)GTK_ImgsToPDF\Core\%(RecursiveDir)%(Filename)%(Extension)" SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
   </Target>
 
   <ItemGroup>
@@ -50,6 +46,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Modules\unicode.lua">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Modules\VisualGTK.lua">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>

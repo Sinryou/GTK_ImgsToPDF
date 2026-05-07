@@ -8,8 +8,8 @@ local visualGTK = require("Modules.VisualGTK")
 local u2a = unicode.u2a
 local a2u = unicode.a2u
 
-local iPageSize = CS.iTextSharp.text.PageSize
-local iRectangle = CS.iTextSharp.text.Rectangle
+local iPageSize = CS.iText.Kernel.Geom.PageSize
+local iRectangle = CS.iText.Kernel.Geom.Rectangle
 local commonUtils = CS.ImgsToPDFCore.CommonUtils
 local PDFWrapper = CS.ImgsToPDFCore.PDFWrapper
 
@@ -43,8 +43,8 @@ local function mergePdfs(path)
     end
     table.insert(pdf2MergeList, path.."/"..pathUtil.dirName(path) ..".pdf")
     -- PDFWrapper.PdfMerge(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
-    -- PDFWrapper.PdfMergeWithHierarchicalOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
-    PDFWrapper.PdfMergeWithDeepOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf", path)
+    PDFWrapper.PdfMergeWithHierarchicalOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
+    -- PDFWrapper.PdfMergeWithDeepOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf", path)
 end
 
 -------------------------------------------------------------------

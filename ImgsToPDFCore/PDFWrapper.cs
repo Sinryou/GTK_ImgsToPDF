@@ -225,6 +225,10 @@ namespace ImgsToPDFCore {
                         using (var inputPdf = new PdfDocument(new PdfReader(file))) {
                             int pageCount = inputPdf.GetNumberOfPages();
 
+                            // 先复制页面到输出PDF
+                            inputPdf.CopyPagesTo(1, pageCount, outputPdf);
+
+                            // 现在可以安全地创建书签，因为页面已经存在
                             string folderName = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(file));
                             string fileName = System.IO.Path.GetFileNameWithoutExtension(file);
 
@@ -255,7 +259,6 @@ namespace ImgsToPDFCore {
                                 fileNode.AddAction(action);
                             }
 
-                            inputPdf.CopyPagesTo(1, pageCount, outputPdf);
                             currentPage += pageCount;
                         }
                     }
@@ -272,53 +275,62 @@ namespace ImgsToPDFCore {
                 using (var outputPdf = new PdfDocument(writer)) {
                     int currentPage = 1;
 
+                    // 第一遍：先合并所有页面并记录页码范围
+                    var pageRanges = new List<(string file, int startPage, int pageCount)>();
+
                     foreach (var file in inFiles) {
                         if (!File.Exists(file)) continue;
 
                         using (var inputPdf = new PdfDocument(new PdfReader(file))) {
                             int pageCount = inputPdf.GetNumberOfPages();
-
-                            string relativePath = GetRelativePath(rootPath, file);
-                            string[] pathParts = relativePath.Split(
-                                new[] { System.IO.Path.DirectorySeparatorChar },
-                                StringSplitOptions.RemoveEmptyEntries
-                            );
-
-                            PdfOutline root = outputPdf.GetOutlines(false);
-                            PdfOutline parent = root;
-                            string currentPathAccumulator = rootPath;
-
-                            // 创建文件夹层级书签
-                            for (int i = 0; i < pathParts.Length - 1; i++) {
-                                string folderName = pathParts[i];
-                                currentPathAccumulator = System.IO.Path.Combine(currentPathAccumulator, folderName);
-
-                                if (!outlineCache.ContainsKey(currentPathAccumulator)) {
-                                    var action = PdfAction.CreateGoTo(
-                                        PdfExplicitDestination.CreateFitH(
-                                            outputPdf.GetPage(currentPage), 0
-                                        )
-                                    );
-                                    var folderNode = parent.AddOutline(folderName);
-                                    folderNode.AddAction(action);
-                                    outlineCache[currentPathAccumulator] = folderNode;
-                                }
-                                parent = outlineCache[currentPathAccumulator];
-                            }
-
-                            // 创建文件书签
-                            string fileName = System.IO.Path.GetFileNameWithoutExtension(file);
-                            var fileAction = PdfAction.CreateGoTo(
-                                PdfExplicitDestination.CreateFitH(
-                                    outputPdf.GetPage(currentPage), 0
-                                )
-                            );
-                            var fileNode = parent.AddOutline(fileName);
-                            fileNode.AddAction(fileAction);
-
+                            pageRanges.Add((file, currentPage, pageCount));
                             inputPdf.CopyPagesTo(1, pageCount, outputPdf);
                             currentPage += pageCount;
                         }
+                    }
+
+                    // 第二遍：添加书签（现在可以安全地引用页面）
+                    currentPage = 1;
+                    foreach (var (file, startPage, pageCount) in pageRanges) {
+                        string relativePath = GetRelativePath(rootPath, file);
+                        string[] pathParts = relativePath.Split(
+                            new[] { System.IO.Path.DirectorySeparatorChar },
+                            StringSplitOptions.RemoveEmptyEntries
+                        );
+
+                        PdfOutline root = outputPdf.GetOutlines(false);
+                        PdfOutline parent = root;
+                        string currentPathAccumulator = rootPath;
+
+                        // 创建文件夹层级书签
+                        for (int i = 0; i < pathParts.Length - 1; i++) {
+                            string folderName = pathParts[i];
+                            currentPathAccumulator = System.IO.Path.Combine(currentPathAccumulator, folderName);
+
+                            if (!outlineCache.ContainsKey(currentPathAccumulator)) {
+                                var action = PdfAction.CreateGoTo(
+                                    PdfExplicitDestination.CreateFitH(
+                                        outputPdf.GetPage(startPage), 0
+                                    )
+                                );
+                                var folderNode = parent.AddOutline(folderName);
+                                folderNode.AddAction(action);
+                                outlineCache[currentPathAccumulator] = folderNode;
+                            }
+                            parent = outlineCache[currentPathAccumulator];
+                        }
+
+                        // 创建文件书签
+                        string fileName = System.IO.Path.GetFileNameWithoutExtension(file);
+                        var fileAction = PdfAction.CreateGoTo(
+                            PdfExplicitDestination.CreateFitH(
+                                outputPdf.GetPage(startPage), 0
+                            )
+                        );
+                        var fileNode = parent.AddOutline(fileName);
+                        fileNode.AddAction(fileAction);
+
+                        currentPage += pageCount;
                     }
                 }
             }

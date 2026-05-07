@@ -2,7 +2,7 @@
   "profiles": {
     "ImgsToPDFCore": {
       "commandName": "Project",
-      "commandLineArgs": "-d \"E:\\BaiduNetdiskDownload\\测试文件.rar\" -l 1 -f"
+      "commandLineArgs": "-d \"E:\\Temp\" -m"
     }
   }
 }

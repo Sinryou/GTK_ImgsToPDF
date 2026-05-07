@@ -12,8 +12,8 @@ internal struct CSGlobal {
     [LuaCallCSharp]
     [ReflectionUse]
     public static readonly List<Type> lua_call_cs_list = new List<Type>() {
-        typeof(iTextSharp.text.PageSize),
-        typeof(iTextSharp.text.Rectangle),
+        typeof(iText.Kernel.Geom.PageSize),
+        typeof(iText.Kernel.Geom.Rectangle),
         typeof(PDFWrapper),
     };
     #endregion

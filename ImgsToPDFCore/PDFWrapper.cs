@@ -175,7 +175,11 @@ namespace ImgsToPDFCore {
                         imageBitmapList.Add(bitmap);
                     }
                 }
-                catch (Exception) {
+                catch (Exception ex) {
+                    Console.Error.WriteLine($"[ImgsToPDFCore] Failed to load image '{imagepath}': {ex.GetType().Name}: {ex.Message}");
+                    if (ex.InnerException != null) {
+                        Console.Error.WriteLine($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                    }
                     continue;
                 }
             }

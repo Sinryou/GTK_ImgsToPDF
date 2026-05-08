@@ -2,7 +2,8 @@
   "profiles": {
     "ImgsToPDFCore": {
       "commandName": "Project",
-      "commandLineArgs": "-d \"E:\\Temp\" -m"
+      "commandLineArgs": "-d ../TestPics -l 0",
+      "workingDirectory": "."
     }
   }
 }

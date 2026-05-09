@@ -43,7 +43,7 @@ namespace GTK_ImgsToPDF {
             ShowAll();
 
             // 初始状态下隐藏叠加的小图标
-            _smallFolderIcon?.Hide();
+            _smallFolderIcon.Hide();
         }
 
         private MenuBar CreateMenuBar() {
@@ -57,7 +57,10 @@ namespace GTK_ImgsToPDF {
             fileSub.Append(openFolderItem);
 
             MenuItem clearChosenItem = new("清除选择(S)");
-            clearChosenItem.Activated += (s, e) => ResetToInitialState();
+            clearChosenItem.Activated += (s, e) => {
+                _pathLabel.Text = "等待拖入...";
+                ResetToInitialState();
+            };
             fileSub.Append(clearChosenItem);
 
             fileSub.Append(new SeparatorMenuItem());
@@ -355,7 +358,7 @@ namespace GTK_ImgsToPDF {
             args.RetVal = true; // 表示事件已处理
         }
         private void SelectFolder() {
-            string? selectedPath = null;
+            string selectedPath = null!;
 
             // 1. 创建文件夹选择对话框
             // 参数：标题, 父窗口, 模式 (SelectFolder), 按钮及其返回码
@@ -402,7 +405,7 @@ namespace GTK_ImgsToPDF {
                     .FirstOrDefault();
 
                 if (firstImageFile != null) {
-                    _startBtn?.Sensitive = true;
+                    _startBtn.Sensitive = true;
 
                     // **核心功能：更新预览图**
 
@@ -452,16 +455,16 @@ namespace GTK_ImgsToPDF {
             _smallFolderIcon.Hide();
 
             // 重置 startBtn 状态（安全检查）
-            _startBtn?.Sensitive = false;
+            _startBtn.Sensitive = false;
         }
 
         // 在“关于”菜单项的 Activated 事件中调用
         private void OnAboutClicked(object? sender, EventArgs e) {
             // 获取程序集信息
-            var assembly = System.Reflection.Assembly.GetExecutingAssembly();
+            var assembly = Assembly.GetExecutingAssembly();
             var versionStr = assembly.GetName().Version?.ToString() ?? "Unknown";
             var copyrightAttr = assembly
-                .GetCustomAttributes(typeof(System.Reflection.AssemblyCopyrightAttribute), false)
+                .GetCustomAttributes(typeof(AssemblyCopyrightAttribute), false)
                 .OfType<AssemblyCopyrightAttribute>()
                 .FirstOrDefault();
             var copyright = copyrightAttr?.Copyright ?? string.Empty;

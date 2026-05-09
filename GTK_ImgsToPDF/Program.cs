@@ -315,6 +315,7 @@ namespace GTK_ImgsToPDF {
             p.StartInfo.RedirectStandardOutput = true;  // 重定向输出
             p.StartInfo.RedirectStandardError = true;   // 重定向输出错误
             p.StartInfo.CreateNoWindow = true;          // 设置置不显示示窗口
+            p.StartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(fileName);
             p.Start();
             string stdout = p.StandardOutput.ReadToEnd();
             string stderr = p.StandardError.ReadToEnd();

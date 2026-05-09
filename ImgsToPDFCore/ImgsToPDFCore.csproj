@@ -56,7 +56,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="xlua.dll">
+    <Content Include="xlua.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Update="libxlua.so" Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="XLua.Mini.dll" />

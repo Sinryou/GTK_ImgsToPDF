@@ -8,7 +8,7 @@ namespace ImgsToPDFCore {
         /// </summary>
         class Options {
             [Option('d', "dir-path", Required = true, HelpText = "图片所在的文件夹路径。")]
-            public string DirectoryPath { get; set; }
+            public required string DirectoryPath { get; set; }
 
             [Option('l', "layout", Required = false, HelpText = "页面布局，0为单页输出，1为双页左至右，2为双页右至左。")]
             public Layout Layout { get; set; }

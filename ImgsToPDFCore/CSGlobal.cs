@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using ImgsToPDFCore;
+﻿using ImgsToPDFCore;
 using XLua;
 
 /// <summary>
@@ -8,14 +6,14 @@ using XLua;
 /// </summary>
 internal struct CSGlobal {
     #region readonlys
-    public static readonly LuaEnv luaEnv = new LuaEnv();
+    public static readonly LuaEnv luaEnv = new();
     [LuaCallCSharp]
     [ReflectionUse]
-    public static readonly List<Type> lua_call_cs_list = new List<Type>() {
+    public static readonly List<Type> lua_call_cs_list = [
         typeof(iText.Kernel.Geom.PageSize),
         typeof(iText.Kernel.Geom.Rectangle),
         typeof(PDFWrapper),
-    };
+    ];
     #endregion
     public static IConfig? luaConfig;
 }

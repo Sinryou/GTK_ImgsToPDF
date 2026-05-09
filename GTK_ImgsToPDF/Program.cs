@@ -1,26 +1,23 @@
 ﻿using Gdk;
 using Gtk;
-using System;
 using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace GTK_ImgsToPDF {
     public class ImgsToPDF : Gtk.Window {
         // 界面控件引用，用于动态更新
-        private Overlay _overlay;
-        private EventBox _dropTarget; // 接收拖拽的区域
-        private Image _mainImage;       // 显示图片预览（或初始大文件夹）
-        private Label _hintLabel;       // "拖入包含图片的文件夹"
-        private Label _pathLabel;       // 显示 E:\Temp
-        private Image _smallFolderIcon; // 叠加的小文件夹图标
-        private Button _startBtn;
-        private CheckButton _lossyCheck;
-        private CheckButton _recursiveCheck;
-        private CheckButton _mergeCheck;
-        private ComboBoxText _layoutCombo;
+        private Overlay _overlay = null!;
+        private EventBox _dropTarget = null!; // 接收拖拽的区域
+        private Image _mainImage = null!;       // 显示图片预览（或初始大文件夹）
+        private Label _hintLabel = null!;       // "拖入包含图片的文件夹"
+        private Label _pathLabel = null!;       // 显示 E:\Temp
+        private Image _smallFolderIcon = null!; // 叠加的小文件夹图标
+        private Button _startBtn = null!;
+        private CheckButton _lossyCheck = null!;
+        private CheckButton _recursiveCheck = null!;
+        private CheckButton _mergeCheck = null!;
+        private ComboBoxText _layoutCombo = null!;
 
         // 定义支持的文件扩展名
         private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
@@ -31,7 +28,7 @@ namespace GTK_ImgsToPDF {
             this.DeleteEvent += (s, e) => Application.Quit();
 
             // 主布局：垂直盒子
-            Box mainBox = new Box(Orientation.Vertical, spacing: 0) { Homogeneous = false };
+            Box mainBox = new(Orientation.Vertical, spacing: 0) { Homogeneous = false };
             Add(mainBox);
 
             // 1. 菜单栏
@@ -50,29 +47,29 @@ namespace GTK_ImgsToPDF {
         }
 
         private MenuBar CreateMenuBar() {
-            MenuBar menuBar = new MenuBar();
+            MenuBar menuBar = [];
 
-            MenuItem fileMenu = new MenuItem("文件(F)");
-            Menu fileSub = new Menu();
+            MenuItem fileMenu = new("文件(F)");
+            Menu fileSub = [];
 
-            MenuItem openFolderItem = new MenuItem("打开文件夹(O)");
+            MenuItem openFolderItem = new("打开文件夹(O)");
             openFolderItem.Activated += (s, e) => SelectFolder();
             fileSub.Append(openFolderItem);
 
-            MenuItem clearChosenItem = new MenuItem("清除选择(S)");
+            MenuItem clearChosenItem = new("清除选择(S)");
             clearChosenItem.Activated += (s, e) => ResetToInitialState();
             fileSub.Append(clearChosenItem);
 
             fileSub.Append(new SeparatorMenuItem());
 
-            MenuItem quitItem = new MenuItem("退出程序(E)");
+            MenuItem quitItem = new("退出程序(E)");
             quitItem.Activated += (s, e) => Application.Quit();
             fileSub.Append(quitItem);
             fileMenu.Submenu = fileSub;
 
             menuBar.Append(fileMenu);
 
-            MenuItem configFileItem = new MenuItem("配置文件(C)");
+            MenuItem configFileItem = new("配置文件(C)");
             configFileItem.Activated += (s, e) => {
                 string cfgFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua");
                 if (!File.Exists(cfgFilePath)) {
@@ -87,30 +84,32 @@ namespace GTK_ImgsToPDF {
             };
             menuBar.Append(configFileItem);
 
-            MenuItem langItem = new MenuItem("语言(L)");
-            Menu langSub = new Menu();
+            MenuItem langItem = new("语言(L)");
+            Menu langSub = [];
             langSub.Append(new MenuItem("中文(CN)"));
             langItem.Submenu = langSub;
             menuBar.Append(langItem);
 
-            MenuItem aboutItem = new MenuItem("关于(A)");
+            MenuItem aboutItem = new("关于(A)");
             aboutItem.Activated += OnAboutClicked;
             menuBar.Append(aboutItem);
 
             return menuBar;
         }
 
-        private Widget CreateCentralDragArea() {
+        private EventBox CreateCentralDragArea() {
             // 1. 使用 EventBox 使整个中央区域可接收事件
-            _dropTarget = new EventBox();
+            _dropTarget = [];
 
             // 2. 使用 Overlay 允许元素重叠
-            _overlay = new Overlay();
+            _overlay = [];
             _dropTarget.Add(_overlay);
 
             // --- 底层：垂直内容布局 ---
-            Box contentBox = new Box(Orientation.Vertical, spacing: 10) { Homogeneous = false };
-            contentBox.Valign = Align.Center;
+            Box contentBox = new(Orientation.Vertical, spacing: 10) {
+                Homogeneous = false,
+                Valign = Align.Center
+            };
 
             // 初始状态：显示大文件夹图标
             // 这里使用内置 Stock 图标模拟，实际开发可用特定的 PNG 资源
@@ -121,8 +120,9 @@ namespace GTK_ImgsToPDF {
             _hintLabel = new Label("拖入包含图片的文件夹");
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
 
-            _pathLabel = new Label("等待拖入..."); // 初始状态
-            _pathLabel.MarginTop = 10;
+            _pathLabel = new Label("等待拖入...") {
+                MarginTop = 10
+            }; // 初始状态
 
             contentBox.PackStart(_mainImage, false, false, 0);
             contentBox.PackStart(_hintLabel, false, false, 0);
@@ -132,24 +132,25 @@ namespace GTK_ImgsToPDF {
 
             // --- 叠加层：小文件夹图标 ---
             // 实际开发中应加载一个自定义的透明 PNG 文件
-            _smallFolderIcon = new Image(Stock.Directory, IconSize.Menu);
-            //_smallFolderIcon.PixelSize = 32; // 变小
+            _smallFolderIcon = new Image(Stock.Directory, IconSize.Menu) {
+                //_smallFolderIcon.PixelSize = 32; // 变小
 
-            // 设置在左下角
-            _smallFolderIcon.Halign = Align.Start;
-            _smallFolderIcon.Valign = Align.End;
-            // 设置边距，防止紧贴边缘
-            _smallFolderIcon.MarginStart = 10;
-            _smallFolderIcon.MarginBottom = 10;
+                // 设置在左下角
+                Halign = Align.Start,
+                Valign = Align.End,
+                // 设置边距，防止紧贴边缘
+                MarginStart = 10,
+                MarginBottom = 10
+            };
 
             _overlay.AddOverlay(_smallFolderIcon);
 
 
             // --- 配置拖拽目标的接收能力 ---
             // 设置目标类型为 URI 列表（文件浏览器拖拽通常是这个类型）
-            TargetEntry[] targets = new TargetEntry[] {
+            TargetEntry[] targets = [
             new TargetEntry("text/uri-list", 0, 0)
-        };
+        ];
             Gtk.Drag.DestSet(_dropTarget, DestDefaults.All, targets, DragAction.Copy);
 
             // 连接拖拽接收事件
@@ -158,20 +159,22 @@ namespace GTK_ImgsToPDF {
             return _dropTarget;
         }
 
-        private Widget CreateBottomControls() {
+        private Box CreateBottomControls() {
             // 底部控制栏布局 (与前一个代码示例类似，增加了进度条)
-            Box bottomBox = new Box(Orientation.Vertical, spacing: 10) { Homogeneous = false };
-            bottomBox.MarginStart = 20;
-            bottomBox.MarginEnd = 20;
-            bottomBox.MarginBottom = 10;
+            Box bottomBox = new(Orientation.Vertical, spacing: 10) {
+                Homogeneous = false,
+                MarginStart = 20,
+                MarginEnd = 20,
+                MarginBottom = 10
+            };
 
             // 1. 创建 CheckButton 实例并保留引用
             _lossyCheck = new CheckButton("有损 (更小文件更快生成速度)");
             _recursiveCheck = new CheckButton("递归子文件夹");
-            _mergeCheck = new CheckButton("合并子PDF");
-
-            // 2. 设置初始状态
-            _mergeCheck.Sensitive = false; // 默认禁用状态
+            _mergeCheck = new CheckButton("合并子PDF") {
+                // 2. 设置初始状态
+                Sensitive = false // 默认禁用状态
+            };
             _recursiveCheck.Active = false; // 确保初始未勾选
             // 3. 编写联动逻辑：当递归勾选状态改变时触发
             _recursiveCheck.Toggled += (s, e) => {
@@ -184,15 +187,15 @@ namespace GTK_ImgsToPDF {
             };
 
             // 4. 将它们添加到布局中
-            Box checkBoxes = new Box(Orientation.Horizontal, spacing: 10) { Homogeneous = true };
+            Box checkBoxes = new(Orientation.Horizontal, spacing: 10) { Homogeneous = true };
             checkBoxes.PackStart(_lossyCheck, false, false, 0);
             checkBoxes.PackStart(_recursiveCheck, false, false, 0);
             checkBoxes.PackStart(_mergeCheck, false, false, 0);
             bottomBox.PackStart(checkBoxes, false, false, 0);
 
-            Box actionBox = new Box(Orientation.Horizontal, spacing: 10) { Homogeneous = false };
+            Box actionBox = new(Orientation.Horizontal, spacing: 10) { Homogeneous = false };
             actionBox.PackStart(new Label("PDF输出版式："), false, false, 0);
-            _layoutCombo = new ComboBoxText();
+            _layoutCombo = [];
             _layoutCombo.AppendText("单页");
             _layoutCombo.AppendText("双页");
             _layoutCombo.AppendText("双页右至左");
@@ -204,8 +207,9 @@ namespace GTK_ImgsToPDF {
             _startBtn.SetSizeRequest(100, -1);
             _startBtn.Sensitive = false;
 
-            ProgressBar progressBar = new ProgressBar();
-            progressBar.Valign = Align.Center; // 设置垂直居中
+            ProgressBar progressBar = new() {
+                Valign = Align.Center // 设置垂直居中
+            };
             progressBar.Hide(); // 关键：初始状态不可见
             progressBar.Fraction = 0.0; // 初始进度为 0
 
@@ -235,14 +239,14 @@ namespace GTK_ImgsToPDF {
                               : "ImgsToPDFCore";
             var fileName = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", coreName);
             if (_recursiveCheck.Active && Directory.Exists(_pathLabel.Text)) {
-                RecursiveFolder(_pathLabel.Text, new List<string> { }).AsParallel().WithDegreeOfParallelism(4).ForAll(dirPath => {
-                    string[] args = _lossyCheck.Active ? new string[] {
+                RecursiveFolder(_pathLabel.Text, []).AsParallel().WithDegreeOfParallelism(4).ForAll(dirPath => {
+                    string[] args = _lossyCheck.Active ? [
                         "-d", dirPath,
                         "-l", _layoutCombo.Active.ToString(), "--fast"
-                    } : new string[] {
+                    ] : [
                         "-d", dirPath,
                         "-l", _layoutCombo.Active.ToString()
-                    };
+                    ];
                     var (_, stderr) = RunProcess(fileName, args);
                     if (stderr.Length > 0) {
                         Gtk.Application.Invoke((sender, args) => {
@@ -251,10 +255,10 @@ namespace GTK_ImgsToPDF {
                     }
                 });
                 if (_mergeCheck.Active) {
-                    string[] args = new string[] {
+                    string[] args = [
                         "-d", _pathLabel.Text,
                         "--merge-pdfs"
-                    };
+                    ];
                     var (_, stderr) = RunProcess(fileName, args);
                     if (stderr.Length > 0) {
                         Gtk.Application.Invoke((sender, args) => {
@@ -264,13 +268,13 @@ namespace GTK_ImgsToPDF {
                 }
             }
             else {
-                string[] args = _lossyCheck.Active ? new string[] {
+                string[] args = _lossyCheck.Active ? [
                     "-d", _pathLabel.Text,
                     "-l", _layoutCombo.Active.ToString(), "--fast"
-                } : new string[] {
+                ] : [
                     "-d", _pathLabel.Text,
                     "-l", _layoutCombo.Active.ToString()
-                };
+                ];
                 var (_, stderr) = RunProcess(fileName, args);
                 if (stderr.Length > 0) {
                     Gtk.Application.Invoke((sender, args) => {
@@ -290,13 +294,13 @@ namespace GTK_ImgsToPDF {
         }
         private static (string stdout, string stderr) RunProcess(string fileName, string[] args) {
             // 例Process
-            Process p = new Process();
+            Process p = new();
             p.StartInfo.FileName = fileName;
             // 针对 Windows 和 Linux 采用不同的参数处理策略
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
                 // Windows 处理：处理末尾反斜杠转义问题
                 for (int i = 0; i < args.Length; i++) {
-                    if (!string.IsNullOrEmpty(args[i]) && args[i].EndsWith(@"\")) {
+                    if (!string.IsNullOrEmpty(args[i]) && args[i].EndsWith('\\')) {
                         // 如果以 \ 结尾，再加一个 \ 抵消转义
                         args[i] += @"\";
                     }
@@ -308,7 +312,7 @@ namespace GTK_ImgsToPDF {
             else {
                 // Linux 处理：不需要手动加引号，也不存在反斜杠转义可执行文件的问题
                 // 直接使用 .NET 自动处理的参数拼接
-                p.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(" ") ? $"'{a}'" : a));
+                p.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"'{a}'" : a));
             }
             p.StartInfo.UseShellExecute = false;        // Shell的使用
             p.StartInfo.RedirectStandardInput = true;   // 重定向输入
@@ -334,7 +338,7 @@ namespace GTK_ImgsToPDF {
 
             // 获取第一个 URI 并转换为本地路径
             string firstUri = uris[0];
-            Uri fileUri = new Uri(firstUri);
+            Uri fileUri = new(firstUri);
 
             if (!fileUri.IsFile) { args.RetVal = true; return; }
 
@@ -355,7 +359,7 @@ namespace GTK_ImgsToPDF {
 
             // 1. 创建文件夹选择对话框
             // 参数：标题, 父窗口, 模式 (SelectFolder), 按钮及其返回码
-            using (FileChooserDialog dialog = new FileChooserDialog(
+            using (FileChooserDialog dialog = new(
                 "选择包含图片的文件夹",
                 this, // 如果在 Window 类内，传入 this；否则传入 null
                 FileChooserAction.SelectFolder,
@@ -404,7 +408,7 @@ namespace GTK_ImgsToPDF {
 
                     // 加载并调整图片大小（防止图片过大撑破界面）
                     // 使用 Pixbuf 可以方便地缩放
-                    Pixbuf fullPixbuf = new Pixbuf(firstImageFile);
+                    Pixbuf fullPixbuf = new(firstImageFile);
 
                     // 计算缩放比例，保持长宽比
                     double scale = Math.Min(420.0 / fullPixbuf.Width, 420.0 / fullPixbuf.Height);
@@ -463,14 +467,15 @@ namespace GTK_ImgsToPDF {
             var copyright = copyrightAttr?.Copyright ?? string.Empty;
 
             // 创建对话框
-            AboutDialog ad = new AboutDialog();
-            ad.Logo = GetAppIcon();
-            ad.ProgramName = "ImagesToPDF";
-            ad.Version = versionStr;
-            ad.Copyright = copyright;
-            ad.Website = "https://github.com/Sinryou/ImagesToPDF";
-            ad.License = "By MIT License\n\n" + copyright;
-            ad.TransientFor = this; // 设置父窗口
+            AboutDialog ad = new() {
+                Logo = GetAppIcon(),
+                ProgramName = "ImagesToPDF",
+                Version = versionStr,
+                Copyright = copyright,
+                Website = "https://github.com/Sinryou/ImagesToPDF",
+                License = "By MIT License\n\n" + copyright,
+                TransientFor = this // 设置父窗口
+            };
 
             ad.Run();
             ad.Destroy();
@@ -489,22 +494,21 @@ namespace GTK_ImgsToPDF {
                 return null;
 
             // 2. 将字节数组加载为原始 Pixbuf
-            using (Pixbuf original = new Pixbuf(iconBytes)) {
-                // 3. 计算等比例缩放尺寸
-                // 取 目标宽度/原始宽度 和 目标高度/原始高度 中的最小值，确保图片完全适应框内且不拉伸
-                double ratio = Math.Min((double)targetWidth / original.Width, (double)targetHeight / original.Height);
+            using Pixbuf original = new(iconBytes);
+            // 3. 计算等比例缩放尺寸
+            // 取 目标宽度/原始宽度 和 目标高度/原始高度 中的最小值，确保图片完全适应框内且不拉伸
+            double ratio = Math.Min((double)targetWidth / original.Width, (double)targetHeight / original.Height);
 
-                int finalWidth = (int)(original.Width * ratio);
-                int finalHeight = (int)(original.Height * ratio);
+            int finalWidth = (int)(original.Width * ratio);
+            int finalHeight = (int)(original.Height * ratio);
 
-                // 4. 返回缩放后的 Pixbuf
-                return original.ScaleSimple(finalWidth, finalHeight, InterpType.Bilinear);
-            }
+            // 4. 返回缩放后的 Pixbuf
+            return original.ScaleSimple(finalWidth, finalHeight, InterpType.Bilinear);
         }
 
         public static void Main() {
             Application.Init();
-            new ImgsToPDF();
+            _ = new ImgsToPDF();
             Application.Run();
         }
     }

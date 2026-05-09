@@ -3,13 +3,8 @@ using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Navigation;
 using iText.Layout;
-using iText.Layout.Element;
 using iText.Kernel.Geom;
 using SkiaSharp;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 
 namespace ImgsToPDFCore {
     public enum Layout {
@@ -20,22 +15,22 @@ namespace ImgsToPDFCore {
 
     internal class PDFWrapper {
         // 使用 SkiaSharp 替代 System.Drawing.Bitmap
-        private static SKBitmap LoadImageFromFile(string path) {
-            using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read)) {
-                return SKBitmap.Decode(stream);
-            }
+        private static SKBitmap? LoadImageFromFile(string path) {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+            // SKBitmap.Decode 可能返回 null，方法返回可空类型以避免 CS8600
+            return SKBitmap.Decode(stream);
         }
 
         // 将 SKBitmap 转换为 iText ImageData
         private static ImageData GetImageData(SKBitmap bitmap, bool fastFlag) {
-            using (var image = SKImage.FromBitmap(bitmap)) {
-                SKEncodedImageFormat format = fastFlag ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png;
-                int quality = fastFlag ? 80 : 100;
+            using var image = SKImage.FromBitmap(bitmap);
+            SKEncodedImageFormat format = fastFlag ? SKEncodedImageFormat.Jpeg : SKEncodedImageFormat.Png;
+            int quality = fastFlag ? 80 : 100;
 
-                using (var data = image.Encode(format, quality)) {
-                    return ImageDataFactory.Create(data.ToArray());
-                }
-            }
+            using var data = image.Encode(format, quality);
+            return data == null
+                ? throw new InvalidOperationException($"Failed to encode image to {format}.")
+                : ImageDataFactory.Create(data.ToArray());
         }
 
         // 获取图片尺寸
@@ -73,7 +68,7 @@ namespace ImgsToPDFCore {
         private static void AddPage(Document document, PdfDocument pdfDoc, SKBitmap bitmap, bool fastFlag) {
             PageSize pageSize;
 
-            if (CSGlobal.luaConfig.PageSizeToSave != null) {
+            if (CSGlobal.luaConfig!.PageSizeToSave != null) {
                 pageSize = new PageSize(
                     (float)CSGlobal.luaConfig.PageSizeToSave.GetWidth(),
                     (float)CSGlobal.luaConfig.PageSizeToSave.GetHeight()
@@ -103,50 +98,53 @@ namespace ImgsToPDFCore {
 
         // 核心转换方法
         private static void ImagesToPdf(List<SKBitmap> imageList, Layout layout = Layout.Single, bool fastFlag = false) {
-            using (var ms = new MemoryStream()) {
-                var writer = new PdfWriter(ms);
-                var pdfDoc = new PdfDocument(writer);
-                pdfDoc.SetFlushUnusedObjects(true);
+            using var ms = new MemoryStream();
+            var writer = new PdfWriter(ms);
+            var pdfDoc = new PdfDocument(writer);
+            pdfDoc.SetFlushUnusedObjects(true);
 
-                var document = new Document(pdfDoc);
+            var document = new Document(pdfDoc);
 
-                if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                    foreach (var image in imageList) {
-                        AddPage(document, pdfDoc, image, fastFlag);
-                    }
+            if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
+                foreach (var image in imageList) {
+                    AddPage(document, pdfDoc, image, fastFlag);
                 }
-                else {
-                    for (int i = 0; i < imageList.Count; i++) {
-                        if (i + 1 >= imageList.Count ||
-                            !(imageList[i].Height >= imageList[i].Width && imageList[i + 1].Height >= imageList[i + 1].Width)) {
-                            AddPage(document, pdfDoc, imageList[i], fastFlag);
-                        }
-                        else {
-                            SKBitmap picAtLeft = layout == Layout.DuplexLeftToRight ? imageList[i] : imageList[i + 1];
-                            SKBitmap picAtRight = layout == Layout.DuplexLeftToRight ? imageList[i + 1] : imageList[i];
-
-                            using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                                AddPage(document, pdfDoc, combinedBitmap, fastFlag);
-                            }
-
-                            imageList[i]?.Dispose();
-                            imageList[i + 1]?.Dispose();
-                            i++;
-                        }
-                    }
-                }
-
-                // 如果零页，添加空页
-                if (pdfDoc.GetNumberOfPages() == 0) {
-                    pdfDoc.AddNewPage();
-                }
-
-                document.Close();
-                pdfDoc.Close();
-
-                string pathToSave = CSGlobal.luaConfig.PathToSave();
-                File.WriteAllBytes(pathToSave, ms.ToArray());
             }
+            else {
+                for (int i = 0; i < imageList.Count; i++) {
+                    if (i + 1 >= imageList.Count ||
+                        !(imageList[i].Height >= imageList[i].Width && imageList[i + 1].Height >= imageList[i + 1].Width)) {
+                        AddPage(document, pdfDoc, imageList[i], fastFlag);
+                    }
+                    else {
+                        SKBitmap picAtLeft = layout == Layout.DuplexLeftToRight ? imageList[i] : imageList[i + 1];
+                        SKBitmap picAtRight = layout == Layout.DuplexLeftToRight ? imageList[i + 1] : imageList[i];
+
+                        using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
+                            AddPage(document, pdfDoc, combinedBitmap, fastFlag);
+                        }
+
+                        imageList[i]?.Dispose();
+                        imageList[i + 1]?.Dispose();
+                        i++;
+                    }
+                }
+            }
+
+            // 如果零页，添加空页
+            if (pdfDoc.GetNumberOfPages() == 0) {
+                pdfDoc.AddNewPage();
+            }
+
+            document.Close();
+            pdfDoc.Close();
+
+            string? pathToSave = CSGlobal.luaConfig!.PathToSave();
+            if (string.IsNullOrEmpty(pathToSave)) {
+                throw new InvalidOperationException("PathToSave returned null or empty.");
+            }
+
+            File.WriteAllBytes(pathToSave, ms.ToArray());
         }
         /// <summary>
         /// 将指定文件夹下的图片合并为PDF文件
@@ -157,16 +155,16 @@ namespace ImgsToPDFCore {
         public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
             if (!Directory.Exists(directoryPath)) return;
 
-            List<string> imageExtensions = new List<string> {
+            List<string> imageExtensions = [
                 ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
                 ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
-            };
+            ];
 
             var imagepaths = Directory.EnumerateFiles(directoryPath)
                 .Where(p => imageExtensions.Any(e => System.IO.Path.GetExtension(p)?.ToLower() == e))
                 .OrderBy(p => p, new StringLenComparer());
 
-            List<SKBitmap> imageBitmapList = new List<SKBitmap>();
+            List<SKBitmap> imageBitmapList = [];
 
             foreach (var imagepath in imagepaths) {
                 try {
@@ -199,16 +197,13 @@ namespace ImgsToPDFCore {
             var comparer = new StringLenComparer();
             inFiles.Sort(comparer);
 
-            using (var writer = new PdfWriter(outFile)) {
-                using (var outputPdf = new PdfDocument(writer)) {
-                    foreach (var file in inFiles) {
-                        if (!File.Exists(file)) continue;
+            using var writer = new PdfWriter(outFile);
+            using var outputPdf = new PdfDocument(writer);
+            foreach (var file in inFiles) {
+                if (!File.Exists(file)) continue;
 
-                        using (var inputPdf = new PdfDocument(new PdfReader(file))) {
-                            inputPdf.CopyPagesTo(1, inputPdf.GetNumberOfPages(), outputPdf);
-                        }
-                    }
-                }
+                using var inputPdf = new PdfDocument(new PdfReader(file));
+                inputPdf.CopyPagesTo(1, inputPdf.GetNumberOfPages(), outputPdf);
             }
         }
 
@@ -219,54 +214,52 @@ namespace ImgsToPDFCore {
 
             var folderOutlineCache = new Dictionary<string, PdfOutline>();
 
-            using (var writer = new PdfWriter(outFile)) {
-                using (var outputPdf = new PdfDocument(writer)) {
-                    int currentPage = 1;
+            using var writer = new PdfWriter(outFile);
+            using var outputPdf = new PdfDocument(writer);
+            int currentPage = 1;
 
-                    foreach (var file in inFiles) {
-                        if (!File.Exists(file)) continue;
+            foreach (var file in inFiles) {
+                if (!File.Exists(file)) continue;
 
-                        using (var inputPdf = new PdfDocument(new PdfReader(file))) {
-                            int pageCount = inputPdf.GetNumberOfPages();
+                using var inputPdf = new PdfDocument(new PdfReader(file));
+                int pageCount = inputPdf.GetNumberOfPages();
 
-                            // 先复制页面到输出PDF
-                            inputPdf.CopyPagesTo(1, pageCount, outputPdf);
+                // 先复制页面到输出PDF
+                inputPdf.CopyPagesTo(1, pageCount, outputPdf);
 
-                            // 现在可以安全地创建书签，因为页面已经存在
-                            string folderName = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(file));
-                            string fileName = System.IO.Path.GetFileNameWithoutExtension(file);
+                // 现在可以安全地创建书签，因为页面已经存在
+                string folderName = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(file)) ?? string.Empty;
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(file) ?? string.Empty;
 
-                            PdfOutline root = outputPdf.GetOutlines(false);
-                            PdfOutline parentNode = root;
+                PdfOutline root = outputPdf.GetOutlines(false);
+                PdfOutline parentNode = root;
 
-                            if (!string.IsNullOrEmpty(folderName) && folderName != "abc") {
-                                if (!folderOutlineCache.ContainsKey(folderName)) {
-                                    var action = PdfAction.CreateGoTo(
-                                        PdfExplicitDestination.CreateFitH(
-                                            outputPdf.GetPage(currentPage), 0
-                                        )
-                                    );
-                                    var folderNode = root.AddOutline(folderName);
-                                    folderNode.AddAction(action);
-                                    folderOutlineCache[folderName] = folderNode;
-                                }
-                                parentNode = folderOutlineCache[folderName];
-                            }
-
-                            if (fileName != folderName) {
-                                var action = PdfAction.CreateGoTo(
-                                    PdfExplicitDestination.CreateFitH(
-                                        outputPdf.GetPage(currentPage), 0
-                                    )
-                                );
-                                var fileNode = parentNode.AddOutline(fileName);
-                                fileNode.AddAction(action);
-                            }
-
-                            currentPage += pageCount;
-                        }
+                if (!string.IsNullOrEmpty(folderName) && folderName != "abc") {
+                    if (!folderOutlineCache.TryGetValue(folderName, out PdfOutline? folderNameOutline)) {
+                        var action = PdfAction.CreateGoTo(
+                            PdfExplicitDestination.CreateFitH(
+                                outputPdf.GetPage(currentPage), 0
+                            )
+                        );
+                        var folderNode = root.AddOutline(folderName);
+                        folderNode.AddAction(action);
+                        folderNameOutline = folderNode;
+                        folderOutlineCache[folderName] = folderNameOutline;
                     }
+                    parentNode = folderNameOutline;
                 }
+
+                if (fileName != folderName) {
+                    var action = PdfAction.CreateGoTo(
+                        PdfExplicitDestination.CreateFitH(
+                            outputPdf.GetPage(currentPage), 0
+                        )
+                    );
+                    var fileNode = parentNode.AddOutline(fileName);
+                    fileNode.AddAction(action);
+                }
+
+                currentPage += pageCount;
             }
         }
 
@@ -275,68 +268,63 @@ namespace ImgsToPDFCore {
             inFiles.Sort(new StringLenComparer());
             var outlineCache = new Dictionary<string, PdfOutline>();
 
-            using (var writer = new PdfWriter(outFile)) {
-                using (var outputPdf = new PdfDocument(writer)) {
-                    int currentPage = 1;
+            using var writer = new PdfWriter(outFile);
+            using var outputPdf = new PdfDocument(writer);
+            int currentPage = 1;
 
-                    // 第一遍：先合并所有页面并记录页码范围
-                    var pageRanges = new List<(string file, int startPage, int pageCount)>();
+            // 第一遍：先合并所有页面并记录页码范围
+            var pageRanges = new List<(string file, int startPage, int pageCount)>();
 
-                    foreach (var file in inFiles) {
-                        if (!File.Exists(file)) continue;
+            foreach (var file in inFiles) {
+                if (!File.Exists(file)) continue;
 
-                        using (var inputPdf = new PdfDocument(new PdfReader(file))) {
-                            int pageCount = inputPdf.GetNumberOfPages();
-                            pageRanges.Add((file, currentPage, pageCount));
-                            inputPdf.CopyPagesTo(1, pageCount, outputPdf);
-                            currentPage += pageCount;
-                        }
-                    }
+                using var inputPdf = new PdfDocument(new PdfReader(file));
+                int pageCount = inputPdf.GetNumberOfPages();
+                pageRanges.Add((file, currentPage, pageCount));
+                inputPdf.CopyPagesTo(1, pageCount, outputPdf);
+                currentPage += pageCount;
+            }
 
-                    // 第二遍：添加书签（现在可以安全地引用页面）
-                    currentPage = 1;
-                    foreach (var (file, startPage, pageCount) in pageRanges) {
-                        string relativePath = GetRelativePath(rootPath, file);
-                        string[] pathParts = relativePath.Split(
-                            new[] { System.IO.Path.DirectorySeparatorChar },
-                            StringSplitOptions.RemoveEmptyEntries
-                        );
+            // 第二遍：添加书签（现在可以安全地引用页面）
+            currentPage = 1;
+            foreach (var (file, startPage, pageCount) in pageRanges) {
+                string relativePath = GetRelativePath(rootPath, file);
+                string[] pathParts = relativePath.Split([System.IO.Path.DirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
-                        PdfOutline root = outputPdf.GetOutlines(false);
-                        PdfOutline parent = root;
-                        string currentPathAccumulator = rootPath;
+                PdfOutline root = outputPdf.GetOutlines(false);
+                PdfOutline parent = root;
+                string currentPathAccumulator = rootPath;
 
-                        // 创建文件夹层级书签
-                        for (int i = 0; i < pathParts.Length - 1; i++) {
-                            string folderName = pathParts[i];
-                            currentPathAccumulator = System.IO.Path.Combine(currentPathAccumulator, folderName);
+                // 创建文件夹层级书签
+                for (int i = 0; i < pathParts.Length - 1; i++) {
+                    string folderName = pathParts[i];
+                    currentPathAccumulator = System.IO.Path.Combine(currentPathAccumulator, folderName);
 
-                            if (!outlineCache.ContainsKey(currentPathAccumulator)) {
-                                var action = PdfAction.CreateGoTo(
-                                    PdfExplicitDestination.CreateFitH(
-                                        outputPdf.GetPage(startPage), 0
-                                    )
-                                );
-                                var folderNode = parent.AddOutline(folderName);
-                                folderNode.AddAction(action);
-                                outlineCache[currentPathAccumulator] = folderNode;
-                            }
-                            parent = outlineCache[currentPathAccumulator];
-                        }
-
-                        // 创建文件书签
-                        string fileName = System.IO.Path.GetFileNameWithoutExtension(file);
-                        var fileAction = PdfAction.CreateGoTo(
+                    if (!outlineCache.TryGetValue(currentPathAccumulator, out PdfOutline? currentPathAccumulatorOutline)) {
+                        var action = PdfAction.CreateGoTo(
                             PdfExplicitDestination.CreateFitH(
                                 outputPdf.GetPage(startPage), 0
                             )
                         );
-                        var fileNode = parent.AddOutline(fileName);
-                        fileNode.AddAction(fileAction);
-
-                        currentPage += pageCount;
+                        var folderNode = parent.AddOutline(folderName);
+                        folderNode.AddAction(action);
+                        currentPathAccumulatorOutline = folderNode;
+                        outlineCache[currentPathAccumulator] = currentPathAccumulatorOutline;
                     }
+                    parent = currentPathAccumulatorOutline;
                 }
+
+                // 创建文件书签
+                string fileName = System.IO.Path.GetFileNameWithoutExtension(file) ?? string.Empty;
+                var fileAction = PdfAction.CreateGoTo(
+                    PdfExplicitDestination.CreateFitH(
+                        outputPdf.GetPage(startPage), 0
+                    )
+                );
+                var fileNode = parent.AddOutline(fileName);
+                fileNode.AddAction(fileAction);
+
+                currentPage += pageCount;
             }
         }
 
@@ -345,8 +333,8 @@ namespace ImgsToPDFCore {
                 rootPath += System.IO.Path.DirectorySeparatorChar;
             }
 
-            Uri rootUri = new Uri(rootPath);
-            Uri fullUri = new Uri(fullPath);
+            Uri rootUri = new(rootPath);
+            Uri fullUri = new(fullPath);
             Uri relativeUri = rootUri.MakeRelativeUri(fullUri);
 
             return Uri.UnescapeDataString(relativeUri.ToString())
@@ -356,8 +344,8 @@ namespace ImgsToPDFCore {
         /// 给文件名排序的方法，不使用默认的排序方法，在lua里重写
         /// </summary>
         class StringLenComparer : IComparer<string> {
-            int IComparer<string>.Compare(string x, string y) {
-                return CSGlobal.luaConfig.FilePathComparer(x, y);
+            int IComparer<string>.Compare(string? x, string? y) {
+                return CSGlobal.luaConfig!.FilePathComparer(x ?? string.Empty, y ?? string.Empty);
             }
         }
     }

@@ -1,10 +1,6 @@
 ﻿using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 
 namespace ImgsToPDFCore
 {
@@ -47,9 +43,8 @@ namespace ImgsToPDFCore
         /// <param name="outFileDirectory">解压文件后目录</param>
         /// <param name="password">密码</param>
         public static bool Decompress(string fromFilePath, string outFileDirectory, string password) {
-            using (var archive = ArchiveFactory.OpenArchive(fromFilePath, new ReaderOptions { Password = password })) {
-                return ExtraArchive(archive, outFileDirectory);
-            }
+            using var archive = ArchiveFactory.OpenArchive(fromFilePath, new ReaderOptions { Password = password });
+            return ExtraArchive(archive, outFileDirectory);
         }
     }
 }

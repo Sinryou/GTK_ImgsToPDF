@@ -21,6 +21,7 @@ namespace GTK_ImgsToPDF {
 
         // 定义支持的文件扩展名
         private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+        private readonly string[] _supportedCompressedExtensions = { ".zip", ".rar", ".7z" };
 
         public ImgsToPDF() : base("ImgsToPDF") {
             SetDefaultSize(800, 600);
@@ -55,6 +56,10 @@ namespace GTK_ImgsToPDF {
             MenuItem openFolderItem = new("打开文件夹(O)");
             openFolderItem.Activated += (s, e) => SelectFolder();
             fileSub.Append(openFolderItem);
+
+            MenuItem openArchiveItem = new("打开压缩包(Z)");
+            openArchiveItem.Activated += (s, e) => SelectArchive();
+            fileSub.Append(openArchiveItem);
 
             MenuItem clearChosenItem = new("清除选择(S)");
             clearChosenItem.Activated += (s, e) => {
@@ -120,7 +125,7 @@ namespace GTK_ImgsToPDF {
             // 调整图标大小（可选，如果 Stock 图标太小）
             //_mainImage.PixelSize = 128;
 
-            _hintLabel = new Label("拖入包含图片的文件夹");
+            _hintLabel = new Label("拖入包含图片的文件夹或压缩包");
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
 
             _pathLabel = new Label("等待拖入...") {
@@ -351,9 +356,16 @@ namespace GTK_ImgsToPDF {
             if (Directory.Exists(folderPath)) {
                 ProcessFolder(folderPath);
             }
+            else if (File.Exists(folderPath)) {
+                string extension = System.IO.Path.GetExtension(folderPath).ToLower();
+                if (_supportedCompressedExtensions.Contains(extension)) {
+                    ProcessArchive(folderPath);
+                } else {
+                    Console.WriteLine("拖入的文件不是支持的压缩包格式");
+                }
+            }
             else {
-                // 如果是文件，可以做额外处理，这里暂不实现
-                Console.WriteLine("拖入的不是文件夹");
+                Console.WriteLine("拖入的路径不存在");
             }
             args.RetVal = true; // 表示事件已处理
         }
@@ -388,9 +400,48 @@ namespace GTK_ImgsToPDF {
             if (Directory.Exists(selectedPath)) {
                 ProcessFolder(selectedPath);
             }
-            else {
-                // 如果是文件，可以做额外处理，这里暂不实现
-                Console.WriteLine("拖入的不是文件夹");
+        }
+
+        private void SelectArchive() {
+            string selectedPath = null!;
+
+            using (FileChooserDialog dialog = new(
+                "选择压缩包文件",
+                this,
+                FileChooserAction.Open,
+                "取消", ResponseType.Cancel,
+                "确定", ResponseType.Accept)) {
+                dialog.SetDefaultSize(800, 600);
+
+                // 添加文件过滤器
+                FileFilter archiveFilter = new();
+                archiveFilter.Name = "压缩包文件 (*.zip, *.rar, *.7z)";
+                archiveFilter.AddPattern("*.zip");
+                archiveFilter.AddPattern("*.rar");
+                archiveFilter.AddPattern("*.7z");
+                dialog.AddFilter(archiveFilter);
+
+                FileFilter allFilter = new();
+                allFilter.Name = "所有文件";
+                allFilter.AddPattern("*");
+                dialog.AddFilter(allFilter);
+
+                if (dialog.Run() == (int)ResponseType.Accept) {
+                    selectedPath = dialog.Filename;
+                }
+
+                dialog.Destroy();
+            }
+
+            if (string.IsNullOrEmpty(selectedPath)) {
+                return;
+            }
+
+            if (File.Exists(selectedPath)) {
+                string extension = System.IO.Path.GetExtension(selectedPath).ToLower();
+                if (_supportedCompressedExtensions.Contains(extension)) {
+                    ProcessArchive(selectedPath);
+                }
             }
         }
 
@@ -445,13 +496,31 @@ namespace GTK_ImgsToPDF {
             }
         }
 
+        // 处理压缩包：更新 UI 状态
+        private void ProcessArchive(string archivePath) {
+            _pathLabel.Text = archivePath;
+            _startBtn.Sensitive = true;
+
+            // 显示归档图标
+            _mainImage.Pixbuf = null;
+            _mainImage.Stock = Stock.File;
+            _mainImage.IconSize = (int)IconSize.Dialog;
+            _mainImage.PixelSize = -1;
+
+            SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
+            _hintLabel.Text = "点击开始按钮开始PDF文件生成";
+
+            // 压缩包不显示文件夹叠加图标
+            _smallFolderIcon.Hide();
+        }
+
         private void ResetToInitialState() {
             _mainImage.Pixbuf = null;
             _mainImage.Stock = Stock.Directory;
             _mainImage.IconSize = (int)IconSize.Dialog;
             //_mainImage.PixelSize = 128;
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
-            _hintLabel.Text = "拖入包含图片的文件夹";
+            _hintLabel.Text = "拖入包含图片的文件夹或压缩包";
             _smallFolderIcon.Hide();
 
             // 重置 startBtn 状态（安全检查）

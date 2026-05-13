@@ -1,11 +1,14 @@
 ﻿using Gdk;
 using Gtk;
+using GTK_ImgsToPDF.Config;
+using GTK_ImgsToPDF.Localization;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
 namespace GTK_ImgsToPDF {
     public class ImgsToPDF : Gtk.Window {
+        private readonly ConfigService _configService = new();
         // 界面控件引用，用于动态更新
         private Overlay _overlay = null!;
         private EventBox _dropTarget = null!; // 接收拖拽的区域
@@ -24,6 +27,9 @@ namespace GTK_ImgsToPDF {
         private readonly string[] _supportedCompressedExtensions = { ".zip", ".rar", ".7z" };
 
         public ImgsToPDF() : base("ImgsToPDF") {
+            string language = _configService.Config.UILocale != "" ? _configService.Config.UILocale : System.Globalization.CultureInfo.CurrentCulture.Name;
+            Thread.CurrentThread.CurrentUICulture = new System.Globalization.CultureInfo(language);
+
             SetDefaultSize(800, 600);
             SetPosition(WindowPosition.Center);
             this.DeleteEvent += (s, e) => Application.Quit();
@@ -35,10 +41,10 @@ namespace GTK_ImgsToPDF {
             // 1. 菜单栏
             mainBox.PackStart(CreateMenuBar(), false, false, 0);
 
-            // 1. 中央区域 (拖放区)
+            // 2. 中央区域 (拖放区)
             mainBox.PackStart(CreateCentralDragArea(), true, true, 0);
 
-            // 2. 底部控制栏
+            // 3. 底部控制栏
             mainBox.PackStart(CreateBottomControls(), false, false, 10);
 
             ShowAll();
@@ -50,38 +56,38 @@ namespace GTK_ImgsToPDF {
         private MenuBar CreateMenuBar() {
             MenuBar menuBar = [];
 
-            MenuItem fileMenu = new("文件(F)");
+            MenuItem fileMenu = new(Strings.Menu_File);
             Menu fileSub = [];
 
-            MenuItem openFolderItem = new("打开文件夹(O)");
+            MenuItem openFolderItem = new(Strings.Menu_OpenFolder);
             openFolderItem.Activated += (s, e) => SelectFolder();
             fileSub.Append(openFolderItem);
 
-            MenuItem openArchiveItem = new("打开压缩包(Z)");
+            MenuItem openArchiveItem = new(Strings.Menu_OpenArchive);
             openArchiveItem.Activated += (s, e) => SelectArchive();
             fileSub.Append(openArchiveItem);
 
-            MenuItem clearChosenItem = new("清除选择(S)");
+            MenuItem clearChosenItem = new(Strings.Menu_ClearSelection);
             clearChosenItem.Activated += (s, e) => {
-                _pathLabel.Text = "等待拖入...";
+                _pathLabel.Text = Strings.Path_Waiting;
                 ResetToInitialState();
             };
             fileSub.Append(clearChosenItem);
 
             fileSub.Append(new SeparatorMenuItem());
 
-            MenuItem quitItem = new("退出程序(E)");
+            MenuItem quitItem = new(Strings.Menu_Exit);
             quitItem.Activated += (s, e) => Application.Quit();
             fileSub.Append(quitItem);
             fileMenu.Submenu = fileSub;
 
             menuBar.Append(fileMenu);
 
-            MenuItem configFileItem = new("配置文件(C)");
+            MenuItem configFileItem = new(Strings.Menu_Config);
             configFileItem.Activated += (s, e) => {
                 string cfgFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua");
                 if (!File.Exists(cfgFilePath)) {
-                    MsgBox.Show(this, "配置文件不存在！");
+                    MsgBox.Show(this, Strings.Msg_ConfigMissing);
                     return;
                 }
                 Process.Start(
@@ -92,13 +98,38 @@ namespace GTK_ImgsToPDF {
             };
             menuBar.Append(configFileItem);
 
-            MenuItem langItem = new("语言(L)");
+            MenuItem langItem = new(Strings.Menu_Lang);
             Menu langSub = [];
-            langSub.Append(new MenuItem("中文(CN)"));
+
+            MenuItem menuItemLangCN = new("中文(CN)");
+            menuItemLangCN.Activated += (s, e) => {
+                _configService.Config.UILocale = "zh-CN";
+                _configService.Save();
+                MsgBox.Show(this, "注意：\n语言已切换为中文，程序将立即重启以生效你的语言设置。");
+                RestartApplication();
+            };
+            langSub.Append(menuItemLangCN);
+
+            MenuItem menuItemLangEN = new("English(EN)");
+            menuItemLangEN.Activated += (s, e) => {
+                _configService.Config.UILocale = "en-US";
+                _configService.Save();
+                MsgBox.Show(this, "Notice:\nLanguage switched to English, application will restart immediately to take effect your language setting.");
+                RestartApplication();
+            };
+            langSub.Append(menuItemLangEN);
+
+            if (Thread.CurrentThread.CurrentUICulture.Name.StartsWith("zh")) {
+                menuItemLangCN.Sensitive = false;
+            }
+            else {
+                menuItemLangEN.Sensitive = false;
+            }
+
             langItem.Submenu = langSub;
             menuBar.Append(langItem);
 
-            MenuItem aboutItem = new("关于(A)");
+            MenuItem aboutItem = new(Strings.Menu_About);
             aboutItem.Activated += OnAboutClicked;
             menuBar.Append(aboutItem);
 
@@ -125,10 +156,10 @@ namespace GTK_ImgsToPDF {
             // 调整图标大小（可选，如果 Stock 图标太小）
             //_mainImage.PixelSize = 128;
 
-            _hintLabel = new Label("拖入包含图片的文件夹或压缩包");
+            _hintLabel = new Label(Strings.Hint_Initial);
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
 
-            _pathLabel = new Label("等待拖入...") {
+            _pathLabel = new Label(Strings.Path_Waiting) {
                 MarginTop = 10
             }; // 初始状态
 
@@ -177,9 +208,9 @@ namespace GTK_ImgsToPDF {
             };
 
             // 1. 创建 CheckButton 实例并保留引用
-            _lossyCheck = new CheckButton("有损 (更小文件更快生成速度)");
-            _recursiveCheck = new CheckButton("递归子文件夹");
-            _mergeCheck = new CheckButton("合并子PDF") {
+            _lossyCheck = new CheckButton(Strings.Check_Lossy);
+            _recursiveCheck = new CheckButton(Strings.Check_Recursive);
+            _mergeCheck = new CheckButton(Strings.Check_Merge) {
                 // 2. 设置初始状态
                 Sensitive = false // 默认禁用状态
             };
@@ -202,16 +233,16 @@ namespace GTK_ImgsToPDF {
             bottomBox.PackStart(checkBoxes, false, false, 0);
 
             Box actionBox = new(Orientation.Horizontal, spacing: 10) { Homogeneous = false };
-            actionBox.PackStart(new Label("PDF输出版式："), false, false, 0);
+            actionBox.PackStart(new Label(Strings.Layout_Label), false, false, 0);
             _layoutCombo = [];
-            _layoutCombo.AppendText("单页");
-            _layoutCombo.AppendText("双页");
-            _layoutCombo.AppendText("双页右至左");
+            _layoutCombo.AppendText(Strings.Layout_Single);
+            _layoutCombo.AppendText(Strings.Layout_Duplexlr);
+            _layoutCombo.AppendText(Strings.Layout_Duplexrl);
             _layoutCombo.Active = 0;
             actionBox.PackStart(_layoutCombo, false, false, 20);
 
             // 使用类字段 startBtn
-            _startBtn = new Button("开始");
+            _startBtn = new Button(Strings.Btn_Start);
             _startBtn.SetSizeRequest(100, -1);
             _startBtn.Sensitive = false;
 
@@ -222,7 +253,7 @@ namespace GTK_ImgsToPDF {
             progressBar.Fraction = 0.0; // 初始进度为 0
 
             _startBtn.Clicked += async (s, e) => {
-                _hintLabel.Text = "PDF生成中......";
+                _hintLabel.Text = Strings.Hint_Generating;
                 // 切换为可见状态
                 progressBar.Visible = true;
                 progressBar.Fraction = 0.5;
@@ -230,7 +261,7 @@ namespace GTK_ImgsToPDF {
                 await Task.Run(() => ButtonClickAction());  // 这里的“await”语句会在后台线程运行LoadData方法
                 progressBar.Fraction = 1.0;
                 _startBtn.Sensitive = true;
-                _hintLabel.Text = "PDF文件已经输出到你的指定路径！";
+                _hintLabel.Text = Strings.Hint_Done;
             };
             actionBox.PackStart(_startBtn, false, true, 20);
 
@@ -361,11 +392,11 @@ namespace GTK_ImgsToPDF {
                 if (_supportedCompressedExtensions.Contains(extension)) {
                     ProcessArchive(folderPath);
                 } else {
-                    Console.WriteLine("拖入的文件不是支持的压缩包格式");
+                    Console.WriteLine(Strings.Drop_NotSupported);
                 }
             }
             else {
-                Console.WriteLine("拖入的路径不存在");
+                Console.WriteLine(Strings.Drop_NotExist);
             }
             args.RetVal = true; // 表示事件已处理
         }
@@ -375,11 +406,11 @@ namespace GTK_ImgsToPDF {
             // 1. 创建文件夹选择对话框
             // 参数：标题, 父窗口, 模式 (SelectFolder), 按钮及其返回码
             using (FileChooserDialog dialog = new(
-                "选择包含图片的文件夹",
+                Strings.Dialog_FolderTitle,
                 this, // 如果在 Window 类内，传入 this；否则传入 null
                 FileChooserAction.SelectFolder,
-                "取消", ResponseType.Cancel,
-                "确定", ResponseType.Accept)) {
+                Strings.Dialog_Cancel, ResponseType.Cancel,
+                Strings.Dialog_OK, ResponseType.Accept)) {
                 dialog.SetDefaultSize(800, 600);
                 // 2. 运行对话框并获取用户操作结果
                 if (dialog.Run() == (int)ResponseType.Accept) {
@@ -406,23 +437,24 @@ namespace GTK_ImgsToPDF {
             string selectedPath = null!;
 
             using (FileChooserDialog dialog = new(
-                "选择压缩包文件",
+                Strings.Dialog_ArchiveTitle,
                 this,
                 FileChooserAction.Open,
-                "取消", ResponseType.Cancel,
-                "确定", ResponseType.Accept)) {
+                Strings.Dialog_Cancel, ResponseType.Cancel,
+                Strings.Dialog_OK, ResponseType.Accept)) {
                 dialog.SetDefaultSize(800, 600);
 
                 // 添加文件过滤器
                 FileFilter archiveFilter = new();
-                archiveFilter.Name = "压缩包文件 (*.zip, *.rar, *.7z)";
+                archiveFilter.Name = Strings.Filter_Archive;
                 archiveFilter.AddPattern("*.zip");
                 archiveFilter.AddPattern("*.rar");
                 archiveFilter.AddPattern("*.7z");
                 dialog.AddFilter(archiveFilter);
 
-                FileFilter allFilter = new();
-                allFilter.Name = "所有文件";
+                FileFilter allFilter = new() {
+                    Name = Strings.Filter_All
+                };
                 allFilter.AddPattern("*");
                 dialog.AddFilter(allFilter);
 
@@ -477,7 +509,7 @@ namespace GTK_ImgsToPDF {
 
                     // 更改提示文字颜色
                     SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
-                    _hintLabel.Text = "点击开始按钮开始PDF文件生成";
+                    _hintLabel.Text = Strings.Hint_Ready;
 
                     // **核心功能：显示叠加的小图标**
                     _smallFolderIcon.Show();
@@ -486,12 +518,12 @@ namespace GTK_ImgsToPDF {
                 }
                 else {
                     // 文件夹内没有图片，恢复初始状态或提示
-                    _pathLabel.Text += " (未发现图片)";
+                    _pathLabel.Text += Strings.Msg_NoImages;
                     ResetToInitialState();
                 }
             }
             catch (Exception ex) {
-                MsgBox.Show(this, $"处理文件夹出错: {ex.Message}");
+                MsgBox.Show(this, $"{Strings.Msg_ErrProcess}{ex.Message}");
                 ResetToInitialState();
             }
         }
@@ -508,7 +540,7 @@ namespace GTK_ImgsToPDF {
             _mainImage.PixelSize = -1;
 
             SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
-            _hintLabel.Text = "点击开始按钮开始PDF文件生成";
+            _hintLabel.Text = Strings.Hint_Ready;
 
             // 压缩包不显示文件夹叠加图标
             _smallFolderIcon.Hide();
@@ -520,7 +552,7 @@ namespace GTK_ImgsToPDF {
             _mainImage.IconSize = (int)IconSize.Dialog;
             //_mainImage.PixelSize = 128;
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
-            _hintLabel.Text = "拖入包含图片的文件夹或压缩包";
+            _hintLabel.Text = Strings.Hint_Initial;
             _smallFolderIcon.Hide();
 
             // 重置 startBtn 状态（安全检查）
@@ -576,6 +608,18 @@ namespace GTK_ImgsToPDF {
 
             // 4. 返回缩放后的 Pixbuf
             return original.ScaleSimple(finalWidth, finalHeight, InterpType.Bilinear);
+        }
+
+        private static void RestartApplication() {
+            var fileName = Environment.ProcessPath;
+
+            Process.Start(new ProcessStartInfo {
+                FileName = fileName,
+                UseShellExecute = true
+            });
+
+            Application.Quit();
+            Environment.Exit(0);
         }
 
         public static void Main() {

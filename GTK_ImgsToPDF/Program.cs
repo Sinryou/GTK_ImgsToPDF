@@ -5,6 +5,7 @@ using GTK_ImgsToPDF.Localization;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using SkiaSharp;
 
 namespace GTK_ImgsToPDF {
     public class ImgsToPDF : Gtk.Window {
@@ -490,31 +491,24 @@ namespace GTK_ImgsToPDF {
                 if (firstImageFile != null) {
                     _startBtn.Sensitive = true;
 
-                    // **核心功能：更新预览图**
+                    // 尝试加载预览图（GdkPixbuf 不支持 WebP/TIFF 等格式时回退到 SkiaSharp）
+                    var preview = TryLoadPreviewPixbuf(firstImageFile, 420, 420);
+                    if (preview != null) {
+                        _mainImage.Pixbuf = preview;
+                        _mainImage.PixelSize = -1;
+                        preview.Dispose();
+                    }
+                    else {
+                        _mainImage.Pixbuf = null;
+                        _mainImage.Stock = Stock.File;
+                        _mainImage.IconSize = (int)IconSize.Dialog;
+                        _mainImage.PixelSize = -1;
+                    }
 
-                    // 加载并调整图片大小（防止图片过大撑破界面）
-                    // 使用 Pixbuf 可以方便地缩放
-                    Pixbuf fullPixbuf = new(firstImageFile);
-
-                    // 计算缩放比例，保持长宽比
-                    double scale = Math.Min(420.0 / fullPixbuf.Width, 420.0 / fullPixbuf.Height);
-                    int scaledWidth = (int)(fullPixbuf.Width * scale);
-                    int scaledHeight = (int)(fullPixbuf.Height * scale);
-
-                    Pixbuf scaledPixbuf = fullPixbuf.ScaleSimple(scaledWidth, scaledHeight, InterpType.Bilinear);
-
-                    // 将 Image 控件的数据替换为图片预览
-                    _mainImage.Pixbuf = scaledPixbuf;
-                    _mainImage.PixelSize = -1; // 取消固定像素大小，使用图片实际大小
-
-                    // 更改提示文字颜色
-                    SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
+                    SetLabelColor(_hintLabel, 138, 43, 226);
                     _hintLabel.Text = Strings.Hint_Ready;
 
-                    // **核心功能：显示叠加的小图标**
                     _smallFolderIcon.Show();
-
-                    fullPixbuf.Dispose();
                 }
                 else {
                     // 文件夹内没有图片，恢复初始状态或提示
@@ -588,6 +582,38 @@ namespace GTK_ImgsToPDF {
             var cssProvider = new CssProvider();
             cssProvider.LoadFromData($"label {{ color: rgb({r},{g},{b}); }}");
             label.StyleContext.AddProvider(cssProvider, Gtk.StyleProviderPriority.User);
+        }
+
+        private static Pixbuf? TryLoadPreviewPixbuf(string imagePath, int maxWidth, int maxHeight) {
+            try {
+                return new Pixbuf(imagePath, maxWidth, maxHeight, true);
+            }
+            catch {
+                // GdkPixbuf 不支持此格式，尝试 SkiaSharp
+            }
+
+            try {
+                using var bitmap = SKBitmap.Decode(imagePath);
+                if (bitmap == null) return null;
+
+                double scale = Math.Min((double)maxWidth / bitmap.Width, (double)maxHeight / bitmap.Height);
+                int scaledW = (int)(bitmap.Width * scale);
+                int scaledH = (int)(bitmap.Height * scale);
+
+                using var surface = SKSurface.Create(new SKImageInfo(scaledW, scaledH));
+                var canvas = surface.Canvas;
+                canvas.DrawBitmap(bitmap, new SKRect(0, 0, scaledW, scaledH));
+                using var image = surface.Snapshot();
+                using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+
+                using var loader = new Gdk.PixbufLoader();
+                loader.Write(data.ToArray());
+                loader.Close();
+                return loader.Pixbuf?.Copy();
+            }
+            catch {
+                return null;
+            }
         }
 
         private static Pixbuf? GetAppIcon(int targetWidth = 64, int targetHeight = 64) {

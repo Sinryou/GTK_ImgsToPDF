@@ -23,7 +23,7 @@ namespace GTK_ImgsToPDF {
         private ComboBoxText _layoutCombo = null!;
 
         // 定义支持的文件扩展名
-        private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+        private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng" };
         private readonly string[] _supportedCompressedExtensions = { ".zip", ".rar", ".7z" };
 
         public ImgsToPDF() : base("ImgsToPDF") {

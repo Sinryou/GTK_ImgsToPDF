@@ -2,7 +2,7 @@
   "profiles": {
     "ImgsToPDFCore": {
       "commandName": "Project",
-      "commandLineArgs": "-d ../TestPics -l 0",
+      "commandLineArgs": "-d ../TestPics -l 1 -f",
       "workingDirectory": "."
     }
   }

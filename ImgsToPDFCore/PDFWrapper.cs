@@ -14,7 +14,11 @@ namespace ImgsToPDFCore {
     }
 
     internal class PDFWrapper {
-        // 使用 SkiaSharp 替代 System.Drawing.Bitmap
+        public static readonly string[] SupportedImageExtensions = [
+            ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
+            ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
+        ];
+
         private static SKBitmap? LoadImageFromFile(string path) {
             using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
             // SKBitmap.Decode 可能返回 null，方法返回可空类型以避免 CS8600
@@ -31,11 +35,6 @@ namespace ImgsToPDFCore {
             return data == null
                 ? throw new InvalidOperationException($"Failed to encode image to {format}.")
                 : ImageDataFactory.Create(data.ToArray());
-        }
-
-        // 获取图片尺寸
-        private static (int width, int height) GetImageSize(SKBitmap bitmap) {
-            return (bitmap.Width, bitmap.Height);
         }
 
         // 合并两张图片
@@ -96,48 +95,89 @@ namespace ImgsToPDFCore {
             bitmap.Dispose();
         }
 
-        // 核心转换方法
-        private static void ImagesToPdf(List<SKBitmap> imageList, Layout layout = Layout.Single, bool fastFlag = false) {
+        public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
+            if (!Directory.Exists(directoryPath)) return;
+
+            var imagePaths = Directory.EnumerateFiles(directoryPath)
+                .Where(p => SupportedImageExtensions.Any(e => System.IO.Path.GetExtension(p)?.ToLower() == e))
+                .OrderBy(p => p, new StringLenComparer());
+
             using var ms = new MemoryStream();
             var writer = new PdfWriter(ms);
-            var pdfDoc = new PdfDocument(writer);
+            using var pdfDoc = new PdfDocument(writer);
             pdfDoc.SetFlushUnusedObjects(true);
-
             var document = new Document(pdfDoc);
 
-            if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
-                foreach (var image in imageList) {
-                    AddPage(document, pdfDoc, image, fastFlag);
-                }
-            }
-            else {
-                for (int i = 0; i < imageList.Count; i++) {
-                    if (i + 1 >= imageList.Count ||
-                        !(imageList[i].Height >= imageList[i].Width && imageList[i + 1].Height >= imageList[i + 1].Width)) {
-                        AddPage(document, pdfDoc, imageList[i], fastFlag);
+            try {
+                if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
+                    foreach (var imagePath in imagePaths) {
+                        try {
+                            var bitmap = LoadImageFromFile(imagePath);
+                            if (bitmap != null) {
+                                AddPage(document, pdfDoc, bitmap, fastFlag);
+                            }
+                        }
+                        catch (Exception ex) {
+                            Console.Error.WriteLine($"[ImgsToPDFCore] Failed to load image '{imagePath}': {ex.GetType().Name}: {ex.Message}");
+                            if (ex.InnerException != null) {
+                                Console.Error.WriteLine($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
+                            }
+                        }
                     }
-                    else {
-                        SKBitmap picAtLeft = layout == Layout.DuplexLeftToRight ? imageList[i] : imageList[i + 1];
-                        SKBitmap picAtRight = layout == Layout.DuplexLeftToRight ? imageList[i + 1] : imageList[i];
+                }
+                else {
+                    using var enumerator = imagePaths.GetEnumerator();
+                    while (enumerator.MoveNext()) {
+                        SKBitmap? bm1;
+                        try {
+                            bm1 = LoadImageFromFile(enumerator.Current);
+                        }
+                        catch (Exception ex) {
+                            Console.Error.WriteLine($"[ImgsToPDFCore] Failed to load image '{enumerator.Current}': {ex.GetType().Name}: {ex.Message}");
+                            continue;
+                        }
+                        if (bm1 == null) continue;
 
-                        using (var combinedBitmap = CombineBitmap(picAtLeft, picAtRight, 10)) {
-                            AddPage(document, pdfDoc, combinedBitmap, fastFlag);
+                        if (!enumerator.MoveNext()) {
+                            AddPage(document, pdfDoc, bm1, fastFlag);
+                            break;
                         }
 
-                        imageList[i]?.Dispose();
-                        imageList[i + 1]?.Dispose();
-                        i++;
+                        SKBitmap? bm2;
+                        try {
+                            bm2 = LoadImageFromFile(enumerator.Current);
+                        }
+                        catch (Exception ex) {
+                            Console.Error.WriteLine($"[ImgsToPDFCore] Failed to load image '{enumerator.Current}': {ex.GetType().Name}: {ex.Message}");
+                            AddPage(document, pdfDoc, bm1, fastFlag);
+                            continue;
+                        }
+
+                        if (bm2 == null) {
+                            AddPage(document, pdfDoc, bm1, fastFlag);
+                            continue;
+                        }
+
+                        if (bm1.Height >= bm1.Width && bm2.Height >= bm2.Width) {
+                            SKBitmap picAtLeft = layout == Layout.DuplexLeftToRight ? bm1 : bm2;
+                            SKBitmap picAtRight = layout == Layout.DuplexLeftToRight ? bm2 : bm1;
+                            using var combined = CombineBitmap(picAtLeft, picAtRight, 10);
+                            AddPage(document, pdfDoc, combined, fastFlag);
+                        }
+                        else {
+                            AddPage(document, pdfDoc, bm1, fastFlag);
+                            AddPage(document, pdfDoc, bm2, fastFlag);
+                        }
                     }
                 }
-            }
 
-            // 如果零页，添加空页
-            if (pdfDoc.GetNumberOfPages() == 0) {
-                pdfDoc.AddNewPage();
+                if (pdfDoc.GetNumberOfPages() == 0) {
+                    pdfDoc.AddNewPage();
+                }
             }
-
-            document.Close();
-            pdfDoc.Close();
+            finally {
+                document.Close();
+            }
 
             string? pathToSave = CSGlobal.luaConfig!.PathToSave();
             if (string.IsNullOrEmpty(pathToSave)) {
@@ -145,48 +185,6 @@ namespace ImgsToPDFCore {
             }
 
             File.WriteAllBytes(pathToSave, ms.ToArray());
-        }
-        /// <summary>
-        /// 将指定文件夹下的图片合并为PDF文件
-        /// </summary>
-        /// <param name="directoryPath">文件夹路径</param>
-        /// <param name="layout">合并方式</param>
-        /// <param name="fastFlag">是否以图片质量换取生成速度</param>
-        public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
-            if (!Directory.Exists(directoryPath)) return;
-
-            List<string> imageExtensions = [
-                ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
-                ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
-            ];
-
-            var imagepaths = Directory.EnumerateFiles(directoryPath)
-                .Where(p => imageExtensions.Any(e => System.IO.Path.GetExtension(p)?.ToLower() == e))
-                .OrderBy(p => p, new StringLenComparer());
-
-            List<SKBitmap> imageBitmapList = [];
-
-            foreach (var imagepath in imagepaths) {
-                try {
-                    var bitmap = LoadImageFromFile(imagepath);
-                    if (bitmap != null) {
-                        imageBitmapList.Add(bitmap);
-                    }
-                }
-                catch (Exception ex) {
-                    Console.Error.WriteLine($"[ImgsToPDFCore] Failed to load image '{imagepath}': {ex.GetType().Name}: {ex.Message}");
-                    if (ex.InnerException != null) {
-                        Console.Error.WriteLine($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
-                    }
-                    continue;
-                }
-            }
-
-            ImagesToPdf(imageBitmapList, layout, fastFlag);
-
-            foreach (var bitmap in imageBitmapList) {
-                bitmap?.Dispose();
-            }
         }
         /// <summary>
         /// 合并PDF文件

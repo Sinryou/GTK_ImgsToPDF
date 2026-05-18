@@ -446,8 +446,9 @@ namespace GTK_ImgsToPDF {
                 dialog.SetDefaultSize(800, 600);
 
                 // 添加文件过滤器
-                FileFilter archiveFilter = new();
-                archiveFilter.Name = Strings.Filter_Archive;
+                FileFilter archiveFilter = new() {
+                    Name = Strings.Filter_Archive
+                };
                 archiveFilter.AddPattern("*.zip");
                 archiveFilter.AddPattern("*.rar");
                 archiveFilter.AddPattern("*.7z");

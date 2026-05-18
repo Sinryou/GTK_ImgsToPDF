@@ -138,7 +138,11 @@ namespace ImgsToPDFCore {
                         }
                         if (bm1 == null) continue;
 
-                        if (!enumerator.MoveNext()) {
+                        if (bm1.Width >= bm1.Height) {
+                            AddPage(document, pdfDoc, bm1, fastFlag);
+                            continue;
+                        }
+                        else if (!enumerator.MoveNext()) {
                             AddPage(document, pdfDoc, bm1, fastFlag);
                             break;
                         }

@@ -153,7 +153,7 @@ namespace GTK_ImgsToPDF {
 
             // 初始状态：显示大文件夹图标
             // 这里使用内置 Stock 图标模拟，实际开发可用特定的 PNG 资源
-            _mainImage = new Image(Stock.Directory, IconSize.Dialog);
+            _mainImage = Image.NewFromIconName("folder", IconSize.Dialog);
             // 调整图标大小（可选，如果 Stock 图标太小）
             //_mainImage.PixelSize = 128;
 
@@ -172,16 +172,15 @@ namespace GTK_ImgsToPDF {
 
             // --- 叠加层：小文件夹图标 ---
             // 实际开发中应加载一个自定义的透明 PNG 文件
-            _smallFolderIcon = new Image(Stock.Directory, IconSize.Menu) {
-                //_smallFolderIcon.PixelSize = 32; // 变小
+            _smallFolderIcon = Image.NewFromIconName("folder", IconSize.Menu);
+            //_smallFolderIcon.PixelSize = 32; // 变小
 
-                // 设置在左下角
-                Halign = Align.Start,
-                Valign = Align.End,
-                // 设置边距，防止紧贴边缘
-                MarginStart = 10,
-                MarginBottom = 10
-            };
+            // 设置在左下角
+            _smallFolderIcon.Halign = Align.Start;
+            _smallFolderIcon.Valign = Align.End;
+            // 设置边距，防止紧贴边缘
+            _smallFolderIcon.MarginStart = 10;
+            _smallFolderIcon.MarginBottom = 10;
 
             _overlay.AddOverlay(_smallFolderIcon);
 
@@ -496,14 +495,10 @@ namespace GTK_ImgsToPDF {
                     var preview = TryLoadPreviewPixbuf(firstImageFile, 420, 420);
                     if (preview != null) {
                         _mainImage.Pixbuf = preview;
-                        _mainImage.PixelSize = -1;
                         preview.Dispose();
                     }
                     else {
-                        _mainImage.Pixbuf = null;
-                        _mainImage.Stock = Stock.File;
-                        _mainImage.IconSize = (int)IconSize.Dialog;
-                        _mainImage.PixelSize = -1;
+                        _mainImage.SetFromIconName("image-x-generic", IconSize.Dialog);
                     }
 
                     SetLabelColor(_hintLabel, 138, 43, 226);
@@ -529,10 +524,7 @@ namespace GTK_ImgsToPDF {
             _startBtn.Sensitive = true;
 
             // 显示归档图标
-            _mainImage.Pixbuf = null;
-            _mainImage.Stock = Stock.File;
-            _mainImage.IconSize = (int)IconSize.Dialog;
-            _mainImage.PixelSize = -1;
+            _mainImage.SetFromIconName("package-x-generic", IconSize.Dialog);
 
             SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
             _hintLabel.Text = Strings.Hint_Ready;
@@ -542,10 +534,7 @@ namespace GTK_ImgsToPDF {
         }
 
         private void ResetToInitialState() {
-            _mainImage.Pixbuf = null;
-            _mainImage.Stock = Stock.Directory;
-            _mainImage.IconSize = (int)IconSize.Dialog;
-            //_mainImage.PixelSize = 128;
+            _mainImage.SetFromIconName("folder", IconSize.Dialog);
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = Strings.Hint_Initial;
             _smallFolderIcon.Hide();

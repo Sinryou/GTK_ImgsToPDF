@@ -14,7 +14,7 @@ namespace ImgsToPDFCore {
     }
 
     internal class PDFWrapper {
-        public static readonly string[] SupportedImageExtensions = [
+        private static readonly string[] SupportedImageExtensions = [
             ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
             ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
         ];

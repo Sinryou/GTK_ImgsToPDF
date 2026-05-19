@@ -639,6 +639,10 @@ namespace GTK_ImgsToPDF {
         }
 
         public static void Main() {
+            [DllImport("kernel32.dll", SetLastError = true)]
+            static extern bool SetDllDirectory(string lpPathName);
+            SetDllDirectory(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime"));
+
             Application.Init();
             _ = new ImgsToPDF();
             Application.Run();

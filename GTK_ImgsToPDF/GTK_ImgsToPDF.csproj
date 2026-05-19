@@ -14,6 +14,7 @@
     <PublishSingleFile>True</PublishSingleFile>
     <PublishTrimmed>True</PublishTrimmed>
     <TrimMode>partial</TrimMode>
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">
@@ -22,6 +23,13 @@
       <SourceAssets Include="$(ProjectDir)Core\**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(SourceAssets)" DestinationFiles="$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)" SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
+  </Target>
+
+  <Target Name="RemoveNuGetPdbs" AfterTargets="AfterBuild;Publish" Condition="'$(Configuration)' == 'Release'">
+    <ItemGroup>
+      <_PdbsToRemove Include="$(TargetDir)**\*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(_PdbsToRemove)" />
   </Target>
 
   <ItemGroup>

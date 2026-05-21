@@ -61,22 +61,41 @@ if ffi.os == "Linux" then
     gtk = ffi.load("libgtk-3.so.0")
     gobject = gtk -- Linux 下通常符号是合并的，或者链接到同一地址
 elseif ffi.os == "Windows" then
-    local gtkPath = os.getenv("userprofile") .. [[\AppData\Local\Gtk\3.24.24]]
-    if not pathUtil.dirExist(gtkPath) then
-        gtkPath = pathUtil.currentDir()
+    -- 1. 安全获取用户目录，并统一使用反斜杠
+    local userProfile = os.getenv("userprofile")
+    local gtkPath = nil
+
+    if userProfile then
+        gtkPath = userProfile .. [[\AppData\Local\Gtk\3.24.24]]
     end
 
-    -- 设置 DLL 搜索目录，解决依赖项加载失败问题
-    ffi.C.SetDllDirectoryA(gtkPath)
+    -- 2. 如果 AppData 路径不存在或不可用，fallback 到当前目录的相对路径
+    if not gtkPath or not pathUtil.dirExist(gtkPath) then
+        -- 使用 Windows 的反斜杠统一路径格式
+        local baseDir = pathUtil.currentDir() .. [[\..]]
+        if pathUtil.fileExist(baseDir .. [[\libgtk-3-0.dll]]) then
+            gtkPath = baseDir
+        else
+            gtkPath = baseDir .. [[\runtime]]
+        end
+    end
 
-    -- 必须分别加载 GTK 和 GObject
+    -- 3. 确保最终找到的路径有效，避免传入无效路径给 C API
+    if pathUtil.dirExist(gtkPath) then
+        ffi.C.SetDllDirectoryA(gtkPath)
+    end
+
+    -- 4. 尝试加载库
     local success_gtk, lib_gtk = pcall(ffi.load, "libgtk-3-0.dll")
     local success_gob, lib_gob = pcall(ffi.load, "libgobject-2.0-0.dll")
 
+    -- 6. 结果处理
     if not success_gtk or not success_gob then
-        print("加载库失败。请检查路径和架构(x86/x64)是否匹配。")
+        -- 打印出尝试过的路径，方便用户排查错误
+        print(string.format("加载库失败。当前尝试的 GTK 路径: %s。请检查路径和架构(x86/x64)是否匹配。", gtkPath))
         return
     end
+
     gtk = lib_gtk
     gobject = lib_gob
 end
@@ -85,7 +104,7 @@ end
 -- 这是一个极其重要的点：如果匿名函数被回收，程序会随机崩溃
 local _keep_alive = {}
 local function safe_connect(instance, signal, fn)
-    _keep_alive[fn] = true     -- 保持引用
+    _keep_alive[fn] = true -- 保持引用
     gobject.g_signal_connect_data(instance, signal, fn, nil, nil, 0)
 end
 

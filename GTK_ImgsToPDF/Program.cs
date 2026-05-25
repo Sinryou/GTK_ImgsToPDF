@@ -335,23 +335,27 @@ namespace GTK_ImgsToPDF {
             // 例Process
             Process p = new();
             p.StartInfo.FileName = fileName;
-            // 针对 Windows 和 Linux 采用不同的参数处理策略
-            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
-                // Windows 处理：处理末尾反斜杠转义问题
-                for (int i = 0; i < args.Length; i++) {
-                    if (!string.IsNullOrEmpty(args[i]) && args[i].EndsWith('\\')) {
-                        // 如果以 \ 结尾，再加一个 \ 抵消转义
-                        args[i] += @"\";
-                    }
-                    // 包装双引号以处理空格
-                    args[i] = $"\"{args[i]}\"";
-                }
-                p.StartInfo.Arguments = string.Join(" ", args);
-            }
-            else {
-                // Linux 处理：不需要手动加引号，也不存在反斜杠转义可执行文件的问题
-                // 直接使用 .NET 自动处理的参数拼接
-                p.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"'{a}'" : a));
+            //// 针对 Windows 和 Linux 采用不同的参数处理策略
+            //if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
+            //    // Windows 处理：处理末尾反斜杠转义问题
+            //    for (int i = 0; i < args.Length; i++) {
+            //        if (!string.IsNullOrEmpty(args[i]) && args[i].EndsWith('\\')) {
+            //            // 如果以 \ 结尾，再加一个 \ 抵消转义
+            //            args[i] += @"\";
+            //        }
+            //        // 包装双引号以处理空格
+            //        args[i] = $"\"{args[i]}\"";
+            //    }
+            //    p.StartInfo.Arguments = string.Join(" ", args);
+            //}
+            //else {
+            //    // Linux 处理：不需要手动加引号，也不存在反斜杠转义可执行文件的问题
+            //    // 直接使用 .NET 自动处理的参数拼接
+            //    p.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"'{a}'" : a));
+            //}
+            p.StartInfo.ArgumentList.Clear();
+            foreach (var arg in args) {
+                p.StartInfo.ArgumentList.Add(arg);
             }
             p.StartInfo.UseShellExecute = false;        // Shell的使用
             p.StartInfo.RedirectStandardInput = true;   // 重定向输入

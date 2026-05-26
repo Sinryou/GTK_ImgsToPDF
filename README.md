@@ -3,7 +3,7 @@
 ## 软件界面
 
 ### Windows
-![Windows 界面](GUI_Pics/Win_Interface.png)
+<img src="GUI_Pics/Win_Interface.png" width="500" alt="Windows 界面">
 
 ### Linux
-![Linux 界面](GUI_Pics/Linux_Interface.png)
+<img src="GUI_Pics/Linux_Interface.png" width="500" alt="Linux 界面">

@@ -236,7 +236,7 @@ namespace ImgsToPDFCore {
                 PdfOutline root = outputPdf.GetOutlines(false);
                 PdfOutline parentNode = root;
 
-                if (!string.IsNullOrEmpty(folderName) && folderName != "abc") {
+                if (!string.IsNullOrEmpty(folderName)) {
                     if (!folderOutlineCache.TryGetValue(folderName, out PdfOutline? folderNameOutline)) {
                         var action = PdfAction.CreateGoTo(
                             PdfExplicitDestination.CreateFitH(

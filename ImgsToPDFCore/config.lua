@@ -43,8 +43,8 @@ local function mergePdfs(path)
     end
     table.insert(pdf2MergeList, path.."/"..pathUtil.dirName(path) ..".pdf")
     -- PDFWrapper.PdfMerge(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
-    PDFWrapper.PdfMergeWithHierarchicalOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
-    -- PDFWrapper.PdfMergeWithDeepOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf", path)
+    -- PDFWrapper.PdfMergeWithHierarchicalOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf")
+    PDFWrapper.PdfMergeWithDeepOutlines(pdf2MergeList, path.."/"..pathUtil.dirName(path) .."_Merged.pdf", path)
 end
 
 -------------------------------------------------------------------

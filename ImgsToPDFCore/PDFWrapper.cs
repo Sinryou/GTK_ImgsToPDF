@@ -318,13 +318,20 @@ namespace ImgsToPDFCore {
 
                 // 创建文件书签
                 string fileName = System.IO.Path.GetFileNameWithoutExtension(file) ?? string.Empty;
-                var fileAction = PdfAction.CreateGoTo(
-                    PdfExplicitDestination.CreateFitH(
-                        outputPdf.GetPage(startPage), 0
-                    )
-                );
-                var fileNode = parent.AddOutline(fileName);
-                fileNode.AddAction(fileAction);
+
+                // 获取父文件夹名（pathParts 的最后一个文件夹层级）
+                string? parentFolderName = pathParts.Length >= 2 ? pathParts[^2] : null;
+
+                // 只有文件名与父文件夹名不同时，才创建文件书签
+                if (fileName != parentFolderName) {
+                    var fileAction = PdfAction.CreateGoTo(
+                        PdfExplicitDestination.CreateFitH(
+                            outputPdf.GetPage(startPage), 0
+                        )
+                    );
+                    var fileNode = parent.AddOutline(fileName);
+                    fileNode.AddAction(fileAction);
+                }
 
                 currentPage += pageCount;
             }

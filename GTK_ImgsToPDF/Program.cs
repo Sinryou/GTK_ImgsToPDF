@@ -422,8 +422,7 @@ namespace GTK_ImgsToPDF {
                     selectedPath = dialog.Filename;
                 }
 
-                // 4. 显式销毁对话框
-                dialog.Destroy();
+                // 4. 对话框在 using 块结束时自动销毁
             }
 
             // 如果用户取消或未选择，直接返回，避免对 null 调用 Directory.Exists
@@ -467,7 +466,7 @@ namespace GTK_ImgsToPDF {
                     selectedPath = dialog.Filename;
                 }
 
-                dialog.Destroy();
+                // 对话框在 using 块结束时自动销毁
             }
 
             if (string.IsNullOrEmpty(selectedPath)) {
@@ -498,6 +497,10 @@ namespace GTK_ImgsToPDF {
                     // 尝试加载预览图（GdkPixbuf 不支持 WebP/TIFF 等格式时回退到 SkiaSharp）
                     var preview = TryLoadPreviewPixbuf(firstImageFile, 420, 420);
                     if (preview != null) {
+                        // 释放旧的预览图再设置新的
+                        if (_mainImage.Pixbuf is Pixbuf oldPreview) {
+                            oldPreview.Dispose();
+                        }
                         _mainImage.Pixbuf = preview;
                         preview.Dispose();
                     }
@@ -527,6 +530,10 @@ namespace GTK_ImgsToPDF {
             _pathLabel.Text = archivePath;
             _startBtn.Sensitive = true;
 
+            // 释放旧的预览图
+            if (_mainImage.Pixbuf is Pixbuf oldArchiveIcon) {
+                oldArchiveIcon.Dispose();
+            }
             // 显示归档图标
             _mainImage.SetFromIconName("package-x-generic", IconSize.Dialog);
 
@@ -538,6 +545,10 @@ namespace GTK_ImgsToPDF {
         }
 
         private void ResetToInitialState() {
+            // 释放旧的预览图再重置
+            if (_mainImage.Pixbuf is Pixbuf oldResetIcon) {
+                oldResetIcon.Dispose();
+            }
             _mainImage.SetFromIconName("folder", IconSize.Dialog);
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = Strings.Hint_Initial;
@@ -559,8 +570,9 @@ namespace GTK_ImgsToPDF {
             var copyright = copyrightAttr?.Copyright ?? string.Empty;
 
             // 创建对话框
+            using var logoPixbuf = GetAppIcon();
             AboutDialog ad = new() {
-                Logo = GetAppIcon(),
+                Logo = logoPixbuf,
                 ProgramName = "ImagesToPDF",
                 Version = versionStr,
                 Copyright = copyright,
@@ -573,7 +585,7 @@ namespace GTK_ImgsToPDF {
             ad.Destroy();
         }
         private static void SetLabelColor(Label label, byte r, byte g, byte b) {
-            var cssProvider = new CssProvider();
+            using var cssProvider = new CssProvider();
             cssProvider.LoadFromData($"label {{ color: rgb({r},{g},{b}); }}");
             label.StyleContext.AddProvider(cssProvider, Gtk.StyleProviderPriority.User);
         }

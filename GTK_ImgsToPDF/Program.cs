@@ -26,6 +26,7 @@ namespace GTK_ImgsToPDF {
         // 定义支持的文件扩展名
         private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng" };
         private readonly string[] _supportedCompressedExtensions = { ".zip", ".rar", ".7z" };
+        private CssProvider? _hintStyleProvider;
 
         public ImgsToPDF() : base("ImgsToPDF") {
             string language = _configService.Config.UILocale != "" ? _configService.Config.UILocale : System.Globalization.CultureInfo.CurrentCulture.Name;
@@ -395,7 +396,8 @@ namespace GTK_ImgsToPDF {
                 string extension = System.IO.Path.GetExtension(folderPath).ToLower();
                 if (_supportedCompressedExtensions.Contains(extension)) {
                     ProcessArchive(folderPath);
-                } else {
+                }
+                else {
                     Console.WriteLine(Strings.Drop_NotSupported);
                 }
             }
@@ -505,6 +507,9 @@ namespace GTK_ImgsToPDF {
                         preview.Dispose();
                     }
                     else {
+                        if (_mainImage.Pixbuf is Pixbuf oldGen) {
+                            oldGen.Dispose();
+                        }
                         _mainImage.SetFromIconName("image-x-generic", IconSize.Dialog);
                     }
 
@@ -584,10 +589,14 @@ namespace GTK_ImgsToPDF {
             ad.Run();
             ad.Destroy();
         }
-        private static void SetLabelColor(Label label, byte r, byte g, byte b) {
-            using var cssProvider = new CssProvider();
-            cssProvider.LoadFromData($"label {{ color: rgb({r},{g},{b}); }}");
-            label.StyleContext.AddProvider(cssProvider, Gtk.StyleProviderPriority.User);
+        private void SetLabelColor(Label label, byte r, byte g, byte b) {
+            if (_hintStyleProvider != null) {
+                label.StyleContext.RemoveProvider(_hintStyleProvider);
+                _hintStyleProvider.Dispose();
+            }
+            _hintStyleProvider = new CssProvider();
+            _hintStyleProvider.LoadFromData($"label {{ color: rgb({r},{g},{b}); }}");
+            label.StyleContext.AddProvider(_hintStyleProvider, Gtk.StyleProviderPriority.User);
         }
 
         private static Pixbuf? TryLoadPreviewPixbuf(string imagePath, int maxWidth, int maxHeight) {
@@ -599,18 +608,22 @@ namespace GTK_ImgsToPDF {
             }
 
             try {
-                using var bitmap = SKBitmap.Decode(imagePath);
+                using var codec = SKCodec.Create(imagePath);
+                if (codec == null) return null;
+
+                var info = codec.Info;
+
+                double scale = Math.Min(1.0, Math.Min(
+                    (double)maxWidth / info.Width,
+                    (double)maxHeight / info.Height));
+
+                var dimensions = codec.GetScaledDimensions((float)scale);
+
+                using var bitmap = SKBitmap.Decode(codec, new SKImageInfo(dimensions.Width, dimensions.Height));
+
                 if (bitmap == null) return null;
 
-                double scale = Math.Min((double)maxWidth / bitmap.Width, (double)maxHeight / bitmap.Height);
-                int scaledW = (int)(bitmap.Width * scale);
-                int scaledH = (int)(bitmap.Height * scale);
-
-                using var surface = SKSurface.Create(new SKImageInfo(scaledW, scaledH));
-                var canvas = surface.Canvas;
-                canvas.DrawBitmap(bitmap, new SKRect(0, 0, scaledW, scaledH));
-                using var image = surface.Snapshot();
-                using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+                using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);
 
                 using var loader = new Gdk.PixbufLoader();
                 loader.Write(data.ToArray());

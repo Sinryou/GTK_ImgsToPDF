@@ -92,7 +92,7 @@ namespace GTK_ImgsToPDF {
                     MsgBox.Show(this, Strings.Msg_ConfigMissing);
                     return;
                 }
-                Process.Start(
+                using var _ = Process.Start(
                     new ProcessStartInfo(
                         cfgFilePath
                         ) { UseShellExecute = true }
@@ -333,8 +333,7 @@ namespace GTK_ImgsToPDF {
             return dirs;
         }
         private static (string stdout, string stderr) RunProcess(string fileName, string[] args) {
-            // 例Process
-            Process p = new();
+            using Process p = new();
             p.StartInfo.FileName = fileName;
             //// 针对 Windows 和 Linux 采用不同的参数处理策略
             //if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
@@ -658,7 +657,7 @@ namespace GTK_ImgsToPDF {
         private static void RestartApplication() {
             var fileName = Environment.ProcessPath;
 
-            Process.Start(new ProcessStartInfo {
+            using var _ = Process.Start(new ProcessStartInfo {
                 FileName = fileName,
                 UseShellExecute = true
             });

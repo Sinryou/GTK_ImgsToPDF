@@ -490,6 +490,7 @@ namespace GTK_ImgsToPDF {
                 // 查找第一张图片
                 var firstImageFile = Directory.EnumerateFiles(folderPath)
                     .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file).ToLower()))
+                    .OrderBy(file => file, StringComparer.Ordinal)
                     .FirstOrDefault();
 
                 if (firstImageFile != null) {

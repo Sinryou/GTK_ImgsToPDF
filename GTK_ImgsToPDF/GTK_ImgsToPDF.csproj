@@ -17,6 +17,10 @@
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <AssemblyVersion>1.0.3.0</AssemblyVersion>
     <FileVersion>1.0.3.0</FileVersion>
+    <Authors>Sinryou</Authors>
+    <Company>Sinryou</Company>
+    <Description>将图片合并为PDF文件</Description>
+    <PackageProjectUrl>https://github.com/Sinryou/GTK_ImgsToPDF</PackageProjectUrl>
   </PropertyGroup>
 
   <Target Name="PostBuild" AfterTargets="PostBuildEvent">

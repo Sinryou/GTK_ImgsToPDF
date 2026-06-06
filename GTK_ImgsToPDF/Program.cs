@@ -500,17 +500,22 @@ namespace GTK_ImgsToPDF {
                     var preview = TryLoadPreviewPixbuf(firstImageFile, 420, 420);
                     if (preview != null) {
                         // 释放旧的预览图再设置新的
-                        if (_mainImage.Pixbuf is Pixbuf oldPreview) {
-                            oldPreview.Dispose();
-                        }
+                        //if (_mainImage.Pixbuf is Pixbuf oldPreview) {
+                        //    oldPreview.Dispose();
+                        //}
+                        //_mainImage.Pixbuf = preview;
+                        //preview.Dispose();
+                        var oldPreview = _mainImage.Pixbuf;
                         _mainImage.Pixbuf = preview;
-                        preview.Dispose();
+                        oldPreview?.Dispose();
                     }
                     else {
-                        if (_mainImage.Pixbuf is Pixbuf oldGen) {
-                            oldGen.Dispose();
-                        }
+                        //if (_mainImage.Pixbuf is Pixbuf oldGen) {
+                        //    oldGen.Dispose();
+                        //}
+                        var oldGen = _mainImage.Pixbuf;
                         _mainImage.SetFromIconName("image-x-generic", IconSize.Dialog);
+                        oldGen?.Dispose();
                     }
 
                     SetLabelColor(_hintLabel, 138, 43, 226);
@@ -536,11 +541,13 @@ namespace GTK_ImgsToPDF {
             _startBtn.Sensitive = true;
 
             // 释放旧的预览图
-            if (_mainImage.Pixbuf is Pixbuf oldArchiveIcon) {
-                oldArchiveIcon.Dispose();
-            }
+            //if (_mainImage.Pixbuf is Pixbuf oldArchiveIcon) {
+            //    oldArchiveIcon.Dispose();
+            //}
+            var oldArchiveIcon = _mainImage.Pixbuf;
             // 显示归档图标
             _mainImage.SetFromIconName("package-x-generic", IconSize.Dialog);
+            oldArchiveIcon?.Dispose();
 
             SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
             _hintLabel.Text = Strings.Hint_Ready;
@@ -551,10 +558,13 @@ namespace GTK_ImgsToPDF {
 
         private void ResetToInitialState() {
             // 释放旧的预览图再重置
-            if (_mainImage.Pixbuf is Pixbuf oldResetIcon) {
-                oldResetIcon.Dispose();
-            }
+            //if (_mainImage.Pixbuf is Pixbuf oldResetIcon) {
+            //    oldResetIcon.Dispose();
+            //}
+            var oldResetIcon = _mainImage.Pixbuf;
             _mainImage.SetFromIconName("folder", IconSize.Dialog);
+            oldResetIcon?.Dispose();
+
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = Strings.Hint_Initial;
             _smallFolderIcon.Hide();

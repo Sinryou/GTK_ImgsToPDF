@@ -15,8 +15,8 @@
     <PublishTrimmed>True</PublishTrimmed>
     <TrimMode>partial</TrimMode>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-    <AssemblyVersion>1.0.4.0</AssemblyVersion>
-    <FileVersion>1.0.4.0</FileVersion>
+    <AssemblyVersion>1.0.5.0</AssemblyVersion>
+    <FileVersion>1.0.5.0</FileVersion>
     <Authors>Sinryou</Authors>
     <Company>Sinryou</Company>
     <Description>将图片合并为PDF文件</Description>

@@ -290,7 +290,7 @@ namespace ImgsToPDFCore {
             // 第二遍：添加书签（现在可以安全地引用页面）
             currentPage = 1;
             foreach (var (file, startPage, pageCount) in pageRanges) {
-                string relativePath = GetRelativePath(rootPath, file);
+                string relativePath = System.IO.Path.GetRelativePath(rootPath, file);
                 string[] pathParts = relativePath.Split([System.IO.Path.DirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
                 PdfOutline root = outputPdf.GetOutlines(false);
@@ -337,18 +337,19 @@ namespace ImgsToPDFCore {
             }
         }
 
-        private static string GetRelativePath(string rootPath, string fullPath) {
-            if (!rootPath.EndsWith(System.IO.Path.DirectorySeparatorChar.ToString())) {
-                rootPath += System.IO.Path.DirectorySeparatorChar;
-            }
+        //private static string GetRelativePath(string rootPath, string fullPath) {
+        //    if (!rootPath.EndsWith(System.IO.Path.DirectorySeparatorChar.ToString())) {
+        //        rootPath += System.IO.Path.DirectorySeparatorChar;
+        //    }
 
-            Uri rootUri = new(rootPath);
-            Uri fullUri = new(fullPath);
-            Uri relativeUri = rootUri.MakeRelativeUri(fullUri);
+        //    Uri rootUri = new(rootPath);
+        //    Uri fullUri = new(fullPath);
+        //    Uri relativeUri = rootUri.MakeRelativeUri(fullUri);
 
-            return Uri.UnescapeDataString(relativeUri.ToString())
-                .Replace('/', System.IO.Path.DirectorySeparatorChar);
-        }
+        //    return Uri.UnescapeDataString(relativeUri.ToString())
+        //        .Replace('/', System.IO.Path.DirectorySeparatorChar);
+        //}
+
         /// <summary>
         /// 给文件名排序的方法，不使用默认的排序方法，在lua里重写
         /// </summary>

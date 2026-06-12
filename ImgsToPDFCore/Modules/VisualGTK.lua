@@ -142,6 +142,7 @@ function VisualGTK.InputBox(prompt, title)
         -- gtk.gtk_dialog_run(dialog)
         -- gtk.gtk_widget_destroy(dialog)
 
+        gtk.gtk_widget_destroy(window)
         gtk.gtk_main_quit()
     end)
     gtk.gtk_widget_set_can_default(button, 1)  -- 允许按钮作为默认对象
@@ -150,6 +151,8 @@ function VisualGTK.InputBox(prompt, title)
     gtk.gtk_box_pack_start(vbox, button, 1, 1, 0)
     gtk.gtk_widget_show_all(window)
     gtk.gtk_main()
+
+    _keep_alive = {}
     return inputText
 end
 

@@ -20,9 +20,12 @@ namespace ImgsToPDFCore {
         ];
 
         private static SKBitmap? LoadImageFromFile(string path) {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
-            // SKBitmap.Decode 可能返回 null，方法返回可空类型以避免 CS8600
-            return SKBitmap.Decode(stream);
+            // SKImage 在解码时会自动处理 EXIF 旋转属性
+            using var image = SKImage.FromEncodedData(path);
+            if (image == null) return null;
+
+            // 从方向已纠正的 SKImage 提取 SKBitmap
+            return SKBitmap.FromImage(image);
         }
 
         // 将 SKBitmap 转换为 iText ImageData
@@ -49,7 +52,7 @@ namespace ImgsToPDFCore {
             canvas.Clear(SKColors.White);
 
             // 图片不需要缩放，因此使用默认采样即可
-            var sampling = new SKSamplingOptions(SKFilterMode.Nearest);
+            var sampling = new SKSamplingOptions(SKFilterMode.Linear);
 
             // 绘制第一张图
             canvas.DrawBitmap(bm1, 0, 0, sampling);

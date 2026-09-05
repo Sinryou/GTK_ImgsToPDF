@@ -610,31 +610,49 @@ namespace GTK_ImgsToPDF {
         }
 
         private static Pixbuf? TryLoadPreviewPixbuf(string imagePath, int maxWidth, int maxHeight) {
+            // 1. 尝试使用 GdkPixbuf 加载
             try {
-                return new Pixbuf(imagePath, maxWidth, maxHeight, true);
+                var pixbuf = new Pixbuf(imagePath, maxWidth, maxHeight, true);
+                if (pixbuf != null) {
+                    // 如果 GdkPixbuf 没有自动处理 EXIF，可以使用 ApplyOrientation() 修正
+                    var oriented = pixbuf.ApplyEmbeddedOrientation();
+                    if (oriented != pixbuf) {
+                        pixbuf.Dispose();
+                    }
+                    return oriented;
+                }
             }
             catch {
                 // GdkPixbuf 不支持此格式，尝试 SkiaSharp
             }
 
+            // 2. 尝试使用 SkiaSharp 加载并处理 EXIF 旋转
             try {
-                using var codec = SKCodec.Create(imagePath);
-                if (codec == null) return null;
+                // SKImage.FromEncodedData 内部会自动读取 EXIF 并修正像素方向
+                using var image = SKImage.FromEncodedData(imagePath);
+                if (image == null) return null;
 
-                var info = codec.Info;
-
+                // 这里的 image.Width 和 image.Height 已经是修正过方向后的物理宽高
                 double scale = Math.Min(1.0, Math.Min(
-                    (double)maxWidth / info.Width,
-                    (double)maxHeight / info.Height));
+                    (double)maxWidth / image.Width,
+                    (double)maxHeight / image.Height));
 
-                var dimensions = codec.GetScaledDimensions((float)scale);
+                int targetWidth = (int)(image.Width * scale);
+                int targetHeight = (int)(image.Height * scale);
 
-                using var bitmap = SKBitmap.Decode(codec, new SKImageInfo(dimensions.Width, dimensions.Height));
+                // 从自动旋转好的 SKImage 提取出 SKBitmap
+                using var sourceBitmap = SKBitmap.FromImage(image);
+                if (sourceBitmap == null) return null;
 
-                if (bitmap == null) return null;
+                // 执行缩放（如果不需要缩小，直接使用 sourceBitmap）
+                using var targetBitmap = (scale < 1.0)
+                    ? sourceBitmap.Resize(new SKImageInfo(targetWidth, targetHeight), SKSamplingOptions.Default)
+                    : sourceBitmap;
 
-                using var data = bitmap.Encode(SKEncodedImageFormat.Png, 100);
+                if (targetBitmap == null) return null;
 
+                // 3. 导出为 PNG 并转为 Gdk.Pixbuf
+                using var data = targetBitmap.Encode(SKEncodedImageFormat.Png, 100);
                 using var loader = new Gdk.PixbufLoader();
                 loader.Write(data.ToArray());
                 loader.Close();

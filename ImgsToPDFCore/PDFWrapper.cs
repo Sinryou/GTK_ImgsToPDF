@@ -48,11 +48,14 @@ namespace ImgsToPDFCore {
             // 白色背景
             canvas.Clear(SKColors.White);
 
+            // 图片不需要缩放，因此使用默认采样即可
+            var sampling = new SKSamplingOptions(SKFilterMode.Nearest);
+
             // 绘制第一张图
-            canvas.DrawBitmap(bm1, 0, 0);
+            canvas.DrawBitmap(bm1, 0, 0, sampling);
 
             // 绘制第二张图
-            canvas.DrawBitmap(bm2, bm1.Width + margin, 0);
+            canvas.DrawBitmap(bm2, bm1.Width + margin, 0, sampling);
 
             var result = SKBitmap.FromImage(surface.Snapshot());
 

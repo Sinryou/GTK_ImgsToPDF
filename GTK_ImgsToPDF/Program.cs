@@ -592,7 +592,7 @@ namespace GTK_ImgsToPDF {
                 Version = versionStr,
                 Copyright = copyright,
                 Website = "https://github.com/Sinryou/ImagesToPDF",
-                License = "By MIT License\n\n" + copyright,
+                License = "Under MIT License\n\n" + copyright,
                 TransientFor = this // 设置父窗口
             };
 
@@ -677,7 +677,14 @@ namespace GTK_ImgsToPDF {
             Environment.Exit(0);
         }
 
+        [STAThread]
         public static void Main() {
+            using Mutex mutex = new(true, @"GTK_ImgsToPDF", out bool isFirstInstance);
+
+            if (!isFirstInstance) {
+                return;
+            }
+
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
                 [DllImport("kernel32.dll", SetLastError = true)]
                 static extern bool SetDllDirectory(string lpPathName);

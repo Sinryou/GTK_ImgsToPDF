@@ -92,11 +92,14 @@ namespace GTK_ImgsToPDF {
                     MsgBox.Show(this, Strings.Msg_ConfigMissing);
                     return;
                 }
-                using var _ = Process.Start(
-                    new ProcessStartInfo(
-                        cfgFilePath
-                        ) { UseShellExecute = true }
-                );
+                try {
+                    // 不用 using：Process.Start 返回后记事本仍在运行，立即 Dispose 语义不正确；
+                    // 且文件不存在或未关联打开程序时会抛 Win32Exception，需要提示而不是崩溃
+                    Process.Start(new ProcessStartInfo(cfgFilePath) { UseShellExecute = true });
+                }
+                catch (Exception ex) {
+                    MsgBox.Show(this, ex.Message);
+                }
             };
             menuBar.Append(configFileItem);
 

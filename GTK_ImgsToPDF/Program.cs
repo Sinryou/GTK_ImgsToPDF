@@ -348,7 +348,7 @@ namespace GTK_ImgsToPDF {
         /// 所有界面状态都由调用方在主线程快照后作为参数传入，
         /// 因此本方法内部不得访问任何 GTK 控件。
         /// </summary>
-        private async Task<List<string>> GeneratePdfs(string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
+        private static async Task<List<string>> GeneratePdfs(string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                               ? "ImgsToPDFCore.exe"
@@ -397,7 +397,7 @@ namespace GTK_ImgsToPDF {
                 }
             }
 
-            return errorQueue.ToList();
+            return [.. errorQueue];
         }
 
         /// <summary>
@@ -411,7 +411,7 @@ namespace GTK_ImgsToPDF {
             if (fastMode) {
                 args.Add("--fast");
             }
-            return args.ToArray();
+            return [.. args];
         }
         static List<string> RecursiveFolder(string path, List<string> dirs) {
             dirs.Add(path);

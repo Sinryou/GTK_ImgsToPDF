@@ -178,6 +178,24 @@ namespace GTK_ImgsToPDF.Localization {
         }
         
         /// <summary>
+        ///   查找类似 PDF generation failed: {0} 的本地化字符串。
+        /// </summary>
+        internal static string Hint_Failed {
+            get {
+                return ResourceManager.GetString("Hint_Failed", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 PDF generated, but {0} error(s) occurred. 的本地化字符串。
+        /// </summary>
+        internal static string Hint_GeneratedWithErrors {
+            get {
+                return ResourceManager.GetString("Hint_GeneratedWithErrors", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   查找类似 Generating PDF… 的本地化字符串。
         /// </summary>
         internal static string Hint_Generating {
@@ -327,6 +345,33 @@ namespace GTK_ImgsToPDF.Localization {
         internal static string Msg_ErrProcess {
             get {
                 return ResourceManager.GetString("Msg_ErrProcess", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Error 的本地化字符串。
+        /// </summary>
+        internal static string Msg_ErrorTitle {
+            get {
+                return ResourceManager.GetString("Msg_ErrorTitle", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Invalid directory path 的本地化字符串。
+        /// </summary>
+        internal static string Msg_InvalidPath {
+            get {
+                return ResourceManager.GetString("Msg_InvalidPath", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Only the first dropped item was processed (ignored {0} more) 的本地化字符串。
+        /// </summary>
+        internal static string Msg_MultipleDropped {
+            get {
+                return ResourceManager.GetString("Msg_MultipleDropped", resourceCulture);
             }
         }
         

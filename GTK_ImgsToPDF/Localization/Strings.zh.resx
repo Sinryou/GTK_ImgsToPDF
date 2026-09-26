@@ -156,6 +156,12 @@
   <data name="Hint_Done" xml:space="preserve">
     <value>PDF文件已经输出到你的指定路径！</value>
   </data>
+  <data name="Hint_Failed" xml:space="preserve">
+    <value>PDF生成失败：{0}</value>
+  </data>
+  <data name="Hint_GeneratedWithErrors" xml:space="preserve">
+    <value>PDF已生成，但有 {0} 个错误发生。</value>
+  </data>
   <data name="Hint_Generating" xml:space="preserve">
     <value>PDF生成中……</value>
   </data>
@@ -206,6 +212,15 @@
   </data>
   <data name="Msg_ErrProcess" xml:space="preserve">
     <value>处理文件夹出错：</value>
+  </data>
+  <data name="Msg_ErrorTitle" xml:space="preserve">
+    <value>错误</value>
+  </data>
+  <data name="Msg_InvalidPath" xml:space="preserve">
+    <value>无效的文件夹路径</value>
+  </data>
+  <data name="Msg_MultipleDropped" xml:space="preserve">
+    <value>只处理了第一个拖入项（已忽略其余 {0} 项）</value>
   </data>
   <data name="Msg_NoImages" xml:space="preserve">
     <value> (未发现图片)</value>

@@ -156,6 +156,12 @@
   <data name="Hint_Done" xml:space="preserve">
     <value>PDF has been output to your specified path!</value>
   </data>
+  <data name="Hint_Failed" xml:space="preserve">
+    <value>PDF generation failed: {0}</value>
+  </data>
+  <data name="Hint_GeneratedWithErrors" xml:space="preserve">
+    <value>PDF generated, but {0} error(s) occurred.</value>
+  </data>
   <data name="Hint_Generating" xml:space="preserve">
     <value>Generating PDF…</value>
   </data>
@@ -206,6 +212,15 @@
   </data>
   <data name="Msg_ErrProcess" xml:space="preserve">
     <value>Error processing folder: </value>
+  </data>
+  <data name="Msg_ErrorTitle" xml:space="preserve">
+    <value>Error</value>
+  </data>
+  <data name="Msg_InvalidPath" xml:space="preserve">
+    <value>Invalid directory path</value>
+  </data>
+  <data name="Msg_MultipleDropped" xml:space="preserve">
+    <value>Only the first dropped item was processed (ignored {0} more)</value>
   </data>
   <data name="Msg_NoImages" xml:space="preserve">
     <value> (no images found)</value>

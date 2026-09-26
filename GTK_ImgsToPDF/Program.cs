@@ -2,6 +2,7 @@
 using Gtk;
 using GTK_ImgsToPDF.Config;
 using GTK_ImgsToPDF.Localization;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -197,6 +198,7 @@ namespace GTK_ImgsToPDF {
             Gtk.Drag.DestSet(_dropTarget, DestDefaults.All, targets, DragAction.Copy);
 
             // 连接拖拽接收事件
+            _dropTarget.DragMotion += OnDragMotion;
             _dropTarget.DragDataReceived += OnDragDataReceived;
 
             return _dropTarget;
@@ -257,15 +259,50 @@ namespace GTK_ImgsToPDF {
             progressBar.Fraction = 0.0; // 初始进度为 0
 
             _startBtn.Clicked += async (s, e) => {
+                // ① 先在主线程把控件状态取成局部变量。
+                //    GTK 控件不是线程安全的，后台任务只能读这些快照，不能直接访问控件。
+                string directoryPath = _pathLabel.Text;
+                bool recursive = _recursiveCheck.Active;
+                bool fastMode = _lossyCheck.Active;
+                bool merge = _mergeCheck.Active;
+                int layoutIndex = _layoutCombo.Active;
+
                 _hintLabel.Text = Strings.Hint_Generating;
                 // 切换为可见状态
                 progressBar.Visible = true;
                 progressBar.Fraction = 0.5;
                 _startBtn.Sensitive = false;
-                await Task.Run(() => ButtonClickAction());  // 这里的“await”语句会在后台线程运行LoadData方法
-                progressBar.Fraction = 1.0;
-                _startBtn.Sensitive = true;
-                _hintLabel.Text = Strings.Hint_Done;
+
+                try {
+                    var errors = await Task.Run(() =>
+                        GeneratePdfs(directoryPath, recursive, fastMode, merge, layoutIndex));
+
+                    progressBar.Fraction = 1.0;
+                    if (errors.Count > 0) {
+                        // 有错误时不能再无条件显示"已输出"，要让用户看到实际结果
+                        SetLabelColor(_hintLabel, 200, 100, 0);
+                        _hintLabel.Text = string.Format(Strings.Hint_GeneratedWithErrors, errors.Count);
+                        // 回到 UI 线程统一展示错误，不再让后台线程逐个弹窗
+                        MsgBox.Show(this,
+                            string.Join(Environment.NewLine + Environment.NewLine, errors),
+                            MessageType.Warning,
+                            Strings.Msg_ErrorTitle);
+                    }
+                    else {
+                        SetLabelColor(_hintLabel, 138, 43, 226);
+                        _hintLabel.Text = Strings.Hint_Done;
+                    }
+                }
+                catch (Exception ex) {
+                    progressBar.Fraction = 1.0;
+                    SetLabelColor(_hintLabel, 200, 0, 0);
+                    _hintLabel.Text = string.Format(Strings.Hint_Failed, ex.Message);
+                    MsgBox.Show(this, ex.Message, MessageType.Error, Strings.Msg_ErrorTitle);
+                }
+                finally {
+                    // 无论成功还是出错都恢复按钮可用状态，避免界面卡死
+                    _startBtn.Sensitive = true;
+                }
             };
             actionBox.PackStart(_startBtn, false, true, 20);
 
@@ -275,57 +312,106 @@ namespace GTK_ImgsToPDF {
             return bottomBox;
         }
 
-        private void ButtonClickAction() {
+        /// <summary>
+        /// 同时运行的 Core 进程数硬上限：每个进程都是完整 .NET 运行时，
+        /// 高核数机器上不设上限会一次拉起几十个进程。
+        /// </summary>
+        private const int MaxCoreProcessConcurrency = 8;
+
+        /// <summary>
+        /// 单个 Core 进程的峰值内存预算（含 .NET 运行时、SkiaSharp、
+        /// 最大单张图片解码及编码缓冲）。按大图最坏情况估算，
+        /// 实际峰值通常低于此值。
+        /// </summary>
+        private const long PerCoreProcessMemoryBudget = 1L << 30; // 1 GB
+
+        /// <summary>
+        /// 按当前可用内存估算允许同时运行的 Core 进程数，
+        /// 图片很大时避免同时解码过多大图导致内存耗尽。
+        /// </summary>
+        private static int GetConcurrencyLimitByMemory() {
+            try {
+                // .NET 10 的跨平台替代方案，无需再 P/Invoke GlobalMemoryStatusEx
+                long available = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+                if (available <= 0) {
+                    return int.MaxValue; // 查询不到时不额外限制
+                }
+                return (int)Math.Max(1, available / PerCoreProcessMemoryBudget);
+            }
+            catch {
+                return int.MaxValue;
+            }
+        }
+
+        /// <summary>
+        /// 在后台生成 PDF；错误通过返回值收集，统一回到 UI 线程展示。
+        /// 所有界面状态都由调用方在主线程快照后作为参数传入，
+        /// 因此本方法内部不得访问任何 GTK 控件。
+        /// </summary>
+        private async Task<List<string>> GeneratePdfs(string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                               ? "ImgsToPDFCore.exe"
                               : "ImgsToPDFCore";
-            var fileName = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", coreName);
-            if (_recursiveCheck.Active && Directory.Exists(_pathLabel.Text)) {
-                RecursiveFolder(_pathLabel.Text, []).AsParallel().WithDegreeOfParallelism(4).ForAll(dirPath => {
-                    string[] args = _lossyCheck.Active ? [
-                        "-d", dirPath,
-                        "-l", _layoutCombo.Active.ToString(), "--fast"
-                    ] : [
-                        "-d", dirPath,
-                        "-l", _layoutCombo.Active.ToString()
-                    ];
-                    var (_, stderr) = RunProcess(fileName, args);
-                    if (stderr.Length > 0) {
-                        Gtk.Application.Invoke((sender, args) => {
-                            MsgBox.Show(this, stderr);
-                        });
+            string fileName = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", coreName);
+            var errorQueue = new ConcurrentQueue<string>();
+
+            if (recursive && Directory.Exists(directoryPath)) {
+                var dirs = RecursiveFolder(directoryPath, []);
+
+                // 并发 Core 进程数由任务量、CPU 线程数与可用内存综合决定：
+                // - 任务很少时按任务数并发，避免白白拉起多余的完整 .NET 进程；
+                // - 任务很多时按 CPU 线程数并发，避免进程间争抢 CPU；
+                // - 同时按可用内存估算上限，图片很大时避免同时解码过多大图；
+                // - MaxCoreProcessConcurrency 兜底，防止高核数机器一次拉起过多进程。
+                int maxConcurrency = Math.Max(1, Math.Min(
+                    Math.Min(Environment.ProcessorCount, dirs.Count),
+                    Math.Min(GetConcurrencyLimitByMemory(), MaxCoreProcessConcurrency)));
+
+                using var semaphore = new SemaphoreSlim(maxConcurrency);
+                var tasks = dirs.Select(async dirPath => {
+                    await semaphore.WaitAsync();
+                    try {
+                        var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layoutIndex));
+                        if (stderr.Length > 0) {
+                            errorQueue.Enqueue(stderr);
+                        }
                     }
-                });
-                if (_mergeCheck.Active) {
-                    string[] args = [
-                        "-d", _pathLabel.Text,
-                        "--merge-pdfs"
-                    ];
-                    var (_, stderr) = RunProcess(fileName, args);
+                    finally {
+                        semaphore.Release();
+                    }
+                }).ToList();
+                await Task.WhenAll(tasks);
+
+                if (merge) {
+                    var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layoutIndex: 0, mergePdfs: true));
                     if (stderr.Length > 0) {
-                        Gtk.Application.Invoke((sender, args) => {
-                            MsgBox.Show(this, stderr);
-                        });
+                        errorQueue.Enqueue(stderr);
                     }
                 }
             }
             else {
-                string[] args = _lossyCheck.Active ? [
-                    "-d", _pathLabel.Text,
-                    "-l", _layoutCombo.Active.ToString(), "--fast"
-                ] : [
-                    "-d", _pathLabel.Text,
-                    "-l", _layoutCombo.Active.ToString()
-                ];
-                var (_, stderr) = RunProcess(fileName, args);
+                var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layoutIndex));
                 if (stderr.Length > 0) {
-                    Gtk.Application.Invoke((sender, args) => {
-                        MsgBox.Show(this, stderr);
-                    });
+                    errorQueue.Enqueue(stderr);
                 }
             }
 
+            return errorQueue.ToList();
+        }
+
+        /// <summary>
+        /// 构造传给 Core 进程的命令行参数
+        /// </summary>
+        private static string[] BuildCoreArgs(string path, bool fastMode, int layoutIndex, bool mergePdfs = false) {
+            if (mergePdfs) {
+                return ["-d", path, "--merge-pdfs"];
+            }
+            var args = new List<string> { "-d", path, "-l", layoutIndex.ToString() };
+            if (fastMode) {
+                args.Add("--fast");
+            }
+            return args.ToArray();
         }
         static List<string> RecursiveFolder(string path, List<string> dirs) {
             dirs.Add(path);
@@ -335,27 +421,15 @@ namespace GTK_ImgsToPDF {
             }
             return dirs;
         }
-        private static (string stdout, string stderr) RunProcess(string fileName, string[] args) {
+        /// <summary>
+        /// 运行给定的命令，返回得到的标准输出及标准错误。
+        /// stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁。
+        /// </summary>
+        /// <param name="fileName">需要运行的指令</param>
+        /// <returns>元组：(stdout:标准输出, stderr:标准错误)</returns>
+        private static async Task<(string stdout, string stderr)> RunProcessAsync(string fileName, string[] args) {
             using Process p = new();
             p.StartInfo.FileName = fileName;
-            //// 针对 Windows 和 Linux 采用不同的参数处理策略
-            //if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
-            //    // Windows 处理：处理末尾反斜杠转义问题
-            //    for (int i = 0; i < args.Length; i++) {
-            //        if (!string.IsNullOrEmpty(args[i]) && args[i].EndsWith('\\')) {
-            //            // 如果以 \ 结尾，再加一个 \ 抵消转义
-            //            args[i] += @"\";
-            //        }
-            //        // 包装双引号以处理空格
-            //        args[i] = $"\"{args[i]}\"";
-            //    }
-            //    p.StartInfo.Arguments = string.Join(" ", args);
-            //}
-            //else {
-            //    // Linux 处理：不需要手动加引号，也不存在反斜杠转义可执行文件的问题
-            //    // 直接使用 .NET 自动处理的参数拼接
-            //    p.StartInfo.Arguments = string.Join(" ", args.Select(a => a.Contains(' ') ? $"'{a}'" : a));
-            //}
             p.StartInfo.ArgumentList.Clear();
             foreach (var arg in args) {
                 p.StartInfo.ArgumentList.Add(arg);
@@ -364,13 +438,32 @@ namespace GTK_ImgsToPDF {
             p.StartInfo.RedirectStandardInput = true;   // 重定向输入
             p.StartInfo.RedirectStandardOutput = true;  // 重定向输出
             p.StartInfo.RedirectStandardError = true;   // 重定向输出错误
-            p.StartInfo.CreateNoWindow = true;          // 设置置不显示示窗口
+            p.StartInfo.CreateNoWindow = true;          // 设置不显示窗口
             p.StartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(fileName);
             p.Start();
-            string stdout = p.StandardOutput.ReadToEnd();
-            string stderr = p.StandardError.ReadToEnd();
-            p.WaitForExit();
-            return (stdout, stderr); // 输出出流取得命令行结果
+
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
+            await Task.WhenAll(stdoutTask, stderrTask);
+            await p.WaitForExitAsync();
+
+            return (stdoutTask.Result, stderrTask.Result); // 输出流取得命令行结果
+        }
+
+        /// <summary>
+        /// 拖拽经过时的反馈：只按"目标类型"判断能否接收。
+        /// 拖入内容不是 URI 列表（例如拖一段文字）时光标显示为禁止，
+        /// 等价于原版 DragEnter 里把 e.Effect 设为 None。
+        /// 具体路径是否支持，在 OnDragDataReceived 里判断并给出文字提示。
+        /// </summary>
+        private void OnDragMotion(object o, DragMotionArgs args) {
+            // target_list 传 null 表示使用控件自己注册的目标列表
+            Gdk.Atom target = Gtk.Drag.DestFindTarget(_dropTarget, args.Context, null);
+            bool acceptable = target != null && !string.IsNullOrEmpty(target.Name);
+
+            // Gdk# 的 DragAction 没有 0 值成员，但 GTK 里"不接受"就是 0
+            Gdk.Drag.Status(args.Context, acceptable ? DragAction.Copy : (DragAction)0, args.Time);
+            args.RetVal = true;
         }
 
         // 处理拖拽接收事件
@@ -386,7 +479,11 @@ namespace GTK_ImgsToPDF {
             string firstUri = uris[0];
             Uri fileUri = new(firstUri);
 
-            if (!fileUri.IsFile) { args.RetVal = true; return; }
+            if (!fileUri.IsFile) {
+                NotifyInvalidDrop(Strings.Msg_InvalidPath);
+                args.RetVal = true;
+                return;
+            }
 
             string folderPath = fileUri.LocalPath;
 
@@ -400,13 +497,30 @@ namespace GTK_ImgsToPDF {
                     ProcessArchive(folderPath);
                 }
                 else {
-                    Console.WriteLine(Strings.Drop_NotSupported);
+                    // 原实现只写 Console.WriteLine，而 Windows 下 OutputType 是 WinExe（没有控制台），
+                    // 用户完全看不到任何反馈
+                    NotifyInvalidDrop(Strings.Drop_NotSupported);
                 }
             }
             else {
-                Console.WriteLine(Strings.Drop_NotExist);
+                NotifyInvalidDrop(Strings.Drop_NotExist);
             }
+
+            // 与原版一致只处理第一个拖入项，但要明确告知，避免用户以为全部都处理了
+            if (uris.Length > 1) {
+                _hintLabel.Text = string.Format(Strings.Msg_MultipleDropped, uris.Length - 1);
+            }
+
             args.RetVal = true; // 表示事件已处理
+        }
+
+        /// <summary>
+        /// 拖入内容不可用时给出可见反馈（提示文字 + 对话框）
+        /// </summary>
+        private void NotifyInvalidDrop(string message) {
+            SetLabelColor(_hintLabel, 200, 0, 0);
+            _hintLabel.Text = message;
+            MsgBox.Show(this, message, MessageType.Warning, Strings.Msg_ErrorTitle);
         }
         private void SelectFolder() {
             string selectedPath = null!;
@@ -686,11 +800,27 @@ namespace GTK_ImgsToPDF {
             return original.ScaleSimple(finalWidth, finalHeight, InterpType.Bilinear);
         }
 
-        private static void RestartApplication() {
-            var fileName = Environment.ProcessPath;
+        /// <summary>
+        /// 语言切换会重启进程，而新实例经常在旧实例还没退出时就启动完毕，
+        /// 此时它拿不到单实例互斥体。用这个参数区分"重启出来的实例"与"用户重复启动"。
+        /// </summary>
+        private const string RestartArgument = "--restarted";
 
-            using var _ = Process.Start(new ProcessStartInfo {
+        /// <summary>
+        /// 重启实例等待旧实例释放单实例互斥体的最长时间
+        /// </summary>
+        private const int RestartWaitMilliseconds = 5000;
+
+        private static void RestartApplication() {
+            string? fileName = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(fileName)) {
+                return;
+            }
+
+            // 不用 using：Process.Start 返回后新进程仍在运行，立即 Dispose 语义不正确
+            Process.Start(new ProcessStartInfo {
                 FileName = fileName,
+                Arguments = RestartArgument,
                 UseShellExecute = true
             });
 
@@ -699,11 +829,31 @@ namespace GTK_ImgsToPDF {
         }
 
         [STAThread]
-        public static void Main() {
+        public static void Main(string[] args) {
+            bool restarted = args.Contains(RestartArgument);
+
             using Mutex mutex = new(true, @"GTK_ImgsToPDF", out bool isFirstInstance);
 
             if (!isFirstInstance) {
-                return;
+                // 普通重复启动：直接退出
+                if (!restarted) {
+                    return;
+                }
+
+                // 重启出来的实例：旧实例正在退出，给它一点时间，否则会表现为
+                // "切换语言后程序关掉了、却没有重启"
+                bool acquired;
+                try {
+                    acquired = mutex.WaitOne(RestartWaitMilliseconds);
+                }
+                catch (AbandonedMutexException) {
+                    // 旧实例被强杀，互斥体所有权已转移给本进程
+                    acquired = true;
+                }
+
+                if (!acquired) {
+                    return;
+                }
             }
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {

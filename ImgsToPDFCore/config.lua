@@ -107,10 +107,16 @@ end
 
 -- page size of the output pdf file
 -- 输出PDF档的页大小
--- @type iTextSharp.text.Rectangle
--- e.g. Config.PageSizeToSave = iPageSize.A4 (支持NoResize, A0~A10, B0~B10等)
+-- @type iText.Kernel.Geom.Rectangle
+-- 置 nil（默认）表示"页尺寸跟随图片本身"；
+-- 也可以设为 iPageSize.A4 / iPageSize.B5 等（支持 A0~A10、B0~B10、LETTER、LEGAL 等），
+-- 此时图片会等比缩放并居中，页边距由居中的偏移量决定。
 -- 或 Config.PageSizeToSave = iRectangle(0, 0, width, height)
 Config.PageSizeToSave = iPageSize.NoResize
+
+-- 开启 --fast 时的 JPEG 压缩质量（1~100，默认 75；数值越小体积越小，数值越大画质越好）
+-- @type int
+Config.FastQuality = 75
 
 -- func that you can order your input files
 -- 图片文件排序的方法：提取文件名中的数字段做自然排序，
@@ -163,7 +169,9 @@ function Config:PreProcess(...)
         PDFWrapper.ImagesToPDF(path, layout, fastFlag)
         return
     elseif not common.hasVal(compressSuffix, (pathUtil.getExtension(path) or ""):lower()) then
-        return -- 不以压缩格式结尾 不做动作
+        -- 不以压缩格式结尾 不做动作；必须上报，否则上层会把"什么都没生成"当成生成成功
+        commonUtils.ReportFailure("Not a folder or a supported archive; no PDF was generated: " .. tostring(path))
+        return
     end
 
     pdfFileName = pathUtil.fileNameWithoutExtension(path) or "Output"
@@ -172,6 +180,9 @@ function Config:PreProcess(...)
     if not commonUtils.Decompress(path, tempExtraPath) then
         local password = visualGTK.InputBox("Input password:", "Encrypted Compress File")
         if common.isEmpty(password) or not commonUtils.Decompress(path, tempExtraPath, password) then
+            -- 密码为空或密码错误：必须上报，否则上层会把"什么都没生成"当成生成成功
+            commonUtils.ReportFailure(
+                "Failed to extract the archive (empty or wrong password); no PDF was generated: " .. tostring(path))
             return
         end
     end
@@ -180,6 +191,9 @@ function Config:PreProcess(...)
     if not hasChildImgs then
         if next(childDirs) then
             PDFWrapper.ImagesToPDF(a2u(childDirs[1]), layout, fastFlag)
+        else
+            -- 压缩包内既没有图片也没有子目录：必须上报
+            commonUtils.ReportFailure("No image found in the archive; no PDF was generated: " .. tostring(path))
         end
         return
     end

@@ -25,17 +25,38 @@ namespace GTK_ImgsToPDF {
         private ComboBoxText _layoutCombo = null!;
 
         // 定义支持的文件扩展名
-        private readonly string[] _supportedExtensions = { ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng" };
-        private readonly string[] _supportedCompressedExtensions = { ".zip", ".rar", ".7z" };
+        private readonly string[] _supportedExtensions = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng"];
+        private readonly string[] _supportedCompressedExtensions = [".zip", ".rar", ".7z"];
         private CssProvider? _hintStyleProvider;
 
+        /// <summary>
+        /// 预览图加载的请求序号。预览解码在后台线程进行，用户可能在解码完成前
+        /// 又选了别的目录；用自增序号作废过期结果，避免慢加载覆盖新选择。
+        /// </summary>
+        private int _previewRequestId;
+
         public ImgsToPDF() : base("ImgsToPDF") {
+            // 设置中的语言值可能为空或无效（config.json 被手改/损坏），
+            // 构造 CultureInfo 失败时回退到系统当前语言，避免应用无法启动
             string language = _configService.Config.UILocale != "" ? _configService.Config.UILocale : System.Globalization.CultureInfo.CurrentCulture.Name;
-            Thread.CurrentThread.CurrentUICulture = new System.Globalization.CultureInfo(language);
+            try {
+                Thread.CurrentThread.CurrentUICulture = new System.Globalization.CultureInfo(language);
+            }
+            catch (System.Globalization.CultureNotFoundException) {
+                Thread.CurrentThread.CurrentUICulture = System.Globalization.CultureInfo.CurrentCulture;
+            }
 
             SetDefaultSize(800, 600);
             SetPosition(WindowPosition.Center);
             this.DeleteEvent += (s, e) => Application.Quit();
+
+            // 窗口图标：csproj 的 ApplicationIcon 只管可执行文件本身，
+            // 标题栏与任务栏图标需要在这里显式设置
+            using (var windowIcon = GetAppIcon(48, 48)) {
+                if (windowIcon != null) {
+                    this.Icon = windowIcon;
+                }
+            }
 
             // 主布局：垂直盒子
             Box mainBox = new(Orientation.Vertical, spacing: 0) { Homogeneous = false };
@@ -59,34 +80,36 @@ namespace GTK_ImgsToPDF {
         private MenuBar CreateMenuBar() {
             MenuBar menuBar = [];
 
-            MenuItem fileMenu = new(Strings.Menu_File);
+            // useUnderline: true 让 GTK 把文案里的下划线解析为 Alt 助记符
+            // （对应原版 WinForms 的 &F / &O / &Z …）
+            MenuItem fileMenu = new(Strings.Menu_File) { UseUnderline = true };
             Menu fileSub = [];
 
-            MenuItem openFolderItem = new(Strings.Menu_OpenFolder);
+            MenuItem openFolderItem = new(Strings.Menu_OpenFolder) { UseUnderline = true };
             openFolderItem.Activated += (s, e) => SelectFolder();
             fileSub.Append(openFolderItem);
 
-            MenuItem openArchiveItem = new(Strings.Menu_OpenArchive);
+            MenuItem openArchiveItem = new(Strings.Menu_OpenArchive) { UseUnderline = true };
             openArchiveItem.Activated += (s, e) => SelectArchive();
             fileSub.Append(openArchiveItem);
 
-            MenuItem clearChosenItem = new(Strings.Menu_ClearSelection);
+            MenuItem clearChosenItem = new(Strings.Menu_ClearSelection) { UseUnderline = true };
             clearChosenItem.Activated += (s, e) => {
-                _pathLabel.Text = Strings.Path_Waiting;
+                SetPathLabel(Strings.Path_Waiting);
                 ResetToInitialState();
             };
             fileSub.Append(clearChosenItem);
 
             fileSub.Append(new SeparatorMenuItem());
 
-            MenuItem quitItem = new(Strings.Menu_Exit);
+            MenuItem quitItem = new(Strings.Menu_Exit) { UseUnderline = true };
             quitItem.Activated += (s, e) => Application.Quit();
             fileSub.Append(quitItem);
             fileMenu.Submenu = fileSub;
 
             menuBar.Append(fileMenu);
 
-            MenuItem configFileItem = new(Strings.Menu_Config);
+            MenuItem configFileItem = new(Strings.Menu_Config) { UseUnderline = true };
             configFileItem.Activated += (s, e) => {
                 string cfgFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua");
                 if (!File.Exists(cfgFilePath)) {
@@ -104,7 +127,7 @@ namespace GTK_ImgsToPDF {
             };
             menuBar.Append(configFileItem);
 
-            MenuItem langItem = new(Strings.Menu_Lang);
+            MenuItem langItem = new(Strings.Menu_Lang) { UseUnderline = true };
             Menu langSub = [];
 
             MenuItem menuItemLangCN = new("中文(CN)");
@@ -135,7 +158,7 @@ namespace GTK_ImgsToPDF {
             langItem.Submenu = langSub;
             menuBar.Append(langItem);
 
-            MenuItem aboutItem = new(Strings.Menu_About);
+            MenuItem aboutItem = new(Strings.Menu_About) { UseUnderline = true };
             aboutItem.Activated += OnAboutClicked;
             menuBar.Append(aboutItem);
 
@@ -166,7 +189,11 @@ namespace GTK_ImgsToPDF {
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
 
             _pathLabel = new Label(Strings.Path_Waiting) {
-                MarginTop = 10
+                MarginTop = 10,
+                // 超长路径不应把窗口撑变形：限制最大宽度并中间省略
+                Ellipsize = Pango.EllipsizeMode.Middle,
+                MaxWidthChars = 60,
+                TooltipText = Strings.Path_Waiting
             }; // 初始状态
 
             contentBox.PackStart(_mainImage, false, false, 0);
@@ -199,9 +226,38 @@ namespace GTK_ImgsToPDF {
 
             // 连接拖拽接收事件
             _dropTarget.DragMotion += OnDragMotion;
+            _dropTarget.DragLeave += OnDragLeave;
             _dropTarget.DragDataReceived += OnDragDataReceived;
 
+            // 高亮样式只需注册一次；AddProviderForScreen 是静态方法，无需保留字段
+            Gtk.StyleContext.AddProviderForScreen(Gdk.Screen.Default, CreateDropHighlightProvider(), Gtk.StyleProviderPriority.User);
+
             return _dropTarget;
+        }
+
+        /// <summary>
+        /// 拖拽经过时给拖放区加高亮边框，让"可接收"有正反馈
+        /// （对应原版把 e.Effect 设为 All 时光标变化的可感知性）。
+        /// </summary>
+        private void SetDropHighlight(bool active) {
+            if (active) {
+                _dropTarget.StyleContext.AddClass("dsh-drop-target");
+            }
+            else {
+                _dropTarget.StyleContext.RemoveClass("dsh-drop-target");
+            }
+        }
+
+        private static CssProvider CreateDropHighlightProvider() {
+            var provider = new CssProvider();
+            provider.LoadFromData("""
+                .dsh-drop-target { border: 2px dashed alpha(currentColor, 0.55); border-radius: 6px; }
+                """);
+            return provider;
+        }
+
+        private void OnDragLeave(object o, DragLeaveArgs args) {
+            SetDropHighlight(false);
         }
 
         private Box CreateBottomControls() {
@@ -274,19 +330,30 @@ namespace GTK_ImgsToPDF {
                 _startBtn.Sensitive = false;
 
                 try {
-                    var errors = await Task.Run(() =>
+                    var (failures, warnings) = await Task.Run(() =>
                         GeneratePdfs(directoryPath, recursive, fastMode, merge, layoutIndex));
 
                     progressBar.Fraction = 1.0;
-                    if (errors.Count > 0) {
+
+                    if (failures.Count > 0) {
                         // 有错误时不能再无条件显示"已输出"，要让用户看到实际结果
                         SetLabelColor(_hintLabel, 200, 100, 0);
-                        _hintLabel.Text = string.Format(Strings.Hint_GeneratedWithErrors, errors.Count);
+                        _hintLabel.Text = string.Format(Strings.Hint_GeneratedWithErrors, failures.Count);
                         // 回到 UI 线程统一展示错误，不再让后台线程逐个弹窗
                         MsgBox.Show(this,
-                            string.Join(Environment.NewLine + Environment.NewLine, errors),
+                            string.Join(Environment.NewLine + Environment.NewLine, failures),
                             MessageType.Warning,
                             Strings.Msg_ErrorTitle);
+                    }
+                    else if (warnings.Count > 0) {
+                        // 退出码为 0 说明 PDF 已经生成，这里只是个别图片被跳过，
+                        // 不能报成生成失败（否则一张坏图就会让用户以为整本没出来）
+                        SetLabelColor(_hintLabel, 200, 100, 0);
+                        _hintLabel.Text = string.Format(Strings.Hint_GeneratedWithSkipped, warnings.Count);
+                        MsgBox.Show(this,
+                            string.Join(Environment.NewLine + Environment.NewLine, warnings),
+                            MessageType.Info,
+                            Strings.Msg_WarningTitle);
                     }
                     else {
                         SetLabelColor(_hintLabel, 138, 43, 226);
@@ -344,20 +411,29 @@ namespace GTK_ImgsToPDF {
         }
 
         /// <summary>
-        /// 在后台生成 PDF；错误通过返回值收集，统一回到 UI 线程展示。
+        /// 在后台生成 PDF；结果通过返回值收集，统一回到 UI 线程展示。
         /// 所有界面状态都由调用方在主线程快照后作为参数传入，
         /// 因此本方法内部不得访问任何 GTK 控件。
         /// </summary>
-        private static async Task<List<string>> GeneratePdfs(string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
+        /// <returns>
+        /// (failures, warnings)：
+        /// failures = Core 进程退出码非 0（真的没生成出来）；
+        /// warnings = 退出码为 0 但 stderr 有内容（PDF 已生成，个别图片被跳过）。
+        /// </returns>
+        private static async Task<(List<string> failures, List<string> warnings)> GeneratePdfs(
+                string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                               ? "ImgsToPDFCore.exe"
                               : "ImgsToPDFCore";
             string fileName = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", coreName);
-            var errorQueue = new ConcurrentQueue<string>();
+            var failureQueue = new ConcurrentQueue<string>();
+            var warningQueue = new ConcurrentQueue<string>();
 
             if (recursive && Directory.Exists(directoryPath)) {
-                var dirs = RecursiveFolder(directoryPath, []);
+                // 递归收集子目录可能较慢（大量文件夹），放到后台执行，
+                // 否则含上千个子目录时点"开始"会让窗口出现"无响应"
+                var dirs = await Task.Run(() => RecursiveFolder(directoryPath, []));
 
                 // 并发 Core 进程数由任务量、CPU 线程数与可用内存综合决定：
                 // - 任务很少时按任务数并发，避免白白拉起多余的完整 .NET 进程；
@@ -372,10 +448,8 @@ namespace GTK_ImgsToPDF {
                 var tasks = dirs.Select(async dirPath => {
                     await semaphore.WaitAsync();
                     try {
-                        var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layoutIndex));
-                        if (stderr.Length > 0) {
-                            errorQueue.Enqueue(stderr);
-                        }
+                        var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layoutIndex));
+                        CollectProcessResult(dirPath, stderr, exitCode, failureQueue, warningQueue);
                     }
                     finally {
                         semaphore.Release();
@@ -384,20 +458,38 @@ namespace GTK_ImgsToPDF {
                 await Task.WhenAll(tasks);
 
                 if (merge) {
-                    var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layoutIndex: 0, mergePdfs: true));
-                    if (stderr.Length > 0) {
-                        errorQueue.Enqueue(stderr);
-                    }
+                    var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layoutIndex: 0, mergePdfs: true));
+                    CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
                 }
             }
             else {
-                var (_, stderr) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layoutIndex));
-                if (stderr.Length > 0) {
-                    errorQueue.Enqueue(stderr);
-                }
+                var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layoutIndex));
+                CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
             }
 
-            return [.. errorQueue];
+            return ([.. failureQueue], [.. warningQueue]);
+        }
+
+        /// <summary>
+        /// 归类一次 Core 进程的执行结果。
+        /// 失败（退出码非 0）：stderr 为空时补上退出码，避免弹出内容为空的对话框；
+        /// 警告（退出码为 0 但 stderr 有内容）：例如个别图片解码失败被跳过，PDF 本身已生成。
+        /// 两种情况都会带上对应的目录/压缩包路径，并发处理多个目录时才能定位是谁出的问题。
+        /// </summary>
+        private static void CollectProcessResult(string targetPath, string stderr, int exitCode,
+                                                 ConcurrentQueue<string> failureQueue,
+                                                 ConcurrentQueue<string> warningQueue) {
+            string detail = stderr == null ? string.Empty : stderr.Trim();
+            if (exitCode != 0) {
+                if (detail.Length == 0) {
+                    // 退出码非 0 却没有输出：必须仍然报失败，否则会被当成生成成功
+                    detail = string.Format(Strings.Msg_NoErrorOutput, exitCode);
+                }
+                failureQueue.Enqueue(targetPath + Environment.NewLine + detail);
+            }
+            else if (detail.Length > 0) {
+                warningQueue.Enqueue(targetPath + Environment.NewLine + detail);
+            }
         }
 
         /// <summary>
@@ -426,8 +518,8 @@ namespace GTK_ImgsToPDF {
         /// stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁。
         /// </summary>
         /// <param name="fileName">需要运行的指令</param>
-        /// <returns>元组：(stdout:标准输出, stderr:标准错误)</returns>
-        private static async Task<(string stdout, string stderr)> RunProcessAsync(string fileName, string[] args) {
+        /// <returns>元组：(stdout:标准输出, stderr:标准错误, exitCode:进程退出码)</returns>
+        private static async Task<(string stdout, string stderr, int exitCode)> RunProcessAsync(string fileName, string[] args) {
             using Process p = new();
             p.StartInfo.FileName = fileName;
             p.StartInfo.ArgumentList.Clear();
@@ -442,12 +534,15 @@ namespace GTK_ImgsToPDF {
             p.StartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(fileName);
             p.Start();
 
+            // stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁
             var stdoutTask = p.StandardOutput.ReadToEndAsync();
             var stderrTask = p.StandardError.ReadToEndAsync();
             await Task.WhenAll(stdoutTask, stderrTask);
             await p.WaitForExitAsync();
 
-            return (stdoutTask.Result, stderrTask.Result); // 输出流取得命令行结果
+            // 退出码用于区分"真的失败"（CommonUtils.ReportFailure 会把它设为 1）
+            // 与"PDF 已生成、只是个别图片被跳过"（stderr 有内容但退出码为 0）
+            return (stdoutTask.Result, stderrTask.Result, p.ExitCode);
         }
 
         /// <summary>
@@ -463,61 +558,77 @@ namespace GTK_ImgsToPDF {
 
             // Gdk# 的 DragAction 没有 0 值成员，但 GTK 里"不接受"就是 0
             Gdk.Drag.Status(args.Context, acceptable ? DragAction.Copy : (DragAction)0, args.Time);
+
+            // 悬停期间用虚线边框给出"可放下"的正反馈；具体路径是否受支持
+            // 要等 DragDataReceived 才能判断（悬停阶段拿不到 URI 列表）
+            SetDropHighlight(acceptable);
             args.RetVal = true;
         }
 
         // 处理拖拽接收事件
         private void OnDragDataReceived(object o, DragDataReceivedArgs args) {
-            // 检查数据类型是否正确
-            if (args.Info != 0) { args.RetVal = true; return; }
+            SetDropHighlight(false);
 
-            // 获取拖拽的文件 URI 列表 (file://...)
-            string[] uris = args.SelectionData.Uris;
-            if (uris == null || uris.Length == 0) { args.RetVal = true; return; }
+            // 整个处理过程包在 try/catch 里：拖放源提供的内容不受本程序控制，
+            // 任何意外异常都不应逃逸到 GTK 主循环（那会表现为界面卡死或崩溃）
+            try {
+                // 检查数据类型是否正确
+                if (args.Info != 0) { args.RetVal = true; return; }
 
-            // 获取第一个 URI 并转换为本地路径
-            string firstUri = uris[0];
-            Uri fileUri = new(firstUri);
+                // 获取拖拽的文件 URI 列表 (file://...)
+                string[] uris = args.SelectionData.Uris;
+                if (uris == null || uris.Length == 0) { args.RetVal = true; return; }
 
-            if (!fileUri.IsFile) {
-                NotifyInvalidDrop(Strings.Msg_InvalidPath);
-                args.RetVal = true;
-                return;
-            }
+                // 用 TryCreate 而不是构造函数：从浏览器拖入选中的文本、或拖入
+                // 虚拟文件时，uri-list 里可能不是合法 URI，构造函数会抛 UriFormatException
+                if (!Uri.TryCreate(uris[0], UriKind.Absolute, out Uri? fileUri) || !fileUri.IsFile) {
+                    NotifyInvalidDrop(Strings.Msg_InvalidPath);
+                    args.RetVal = true;
+                    return;
+                }
 
-            string folderPath = fileUri.LocalPath;
+                string folderPath = fileUri.LocalPath;
 
-            // 检查拖入的是否为文件夹
-            if (Directory.Exists(folderPath)) {
-                ProcessFolder(folderPath);
-            }
-            else if (File.Exists(folderPath)) {
-                string extension = System.IO.Path.GetExtension(folderPath).ToLower();
-                if (_supportedCompressedExtensions.Contains(extension)) {
-                    ProcessArchive(folderPath);
+                // 检查拖入的是否为文件夹
+                if (Directory.Exists(folderPath)) {
+                    ProcessFolder(folderPath);
+                }
+                else if (File.Exists(folderPath)) {
+                    string extension = System.IO.Path.GetExtension(folderPath).ToLower();
+                    if (_supportedCompressedExtensions.Contains(extension)) {
+                        ProcessArchive(folderPath);
+                    }
+                    else {
+                        // 原实现只写 Console.WriteLine，而 Windows 下 OutputType 是 WinExe（没有控制台），
+                        // 用户完全看不到任何反馈
+                        NotifyInvalidDrop(Strings.Drop_NotSupported);
+                    }
                 }
                 else {
-                    // 原实现只写 Console.WriteLine，而 Windows 下 OutputType 是 WinExe（没有控制台），
-                    // 用户完全看不到任何反馈
-                    NotifyInvalidDrop(Strings.Drop_NotSupported);
+                    NotifyInvalidDrop(Strings.Drop_NotExist);
+                }
+
+                // 与原版一致只处理第一个拖入项，但要明确告知，避免用户以为全部都处理了
+                if (uris.Length > 1) {
+                    _hintLabel.Text = string.Format(Strings.Msg_MultipleDropped, uris.Length - 1);
                 }
             }
-            else {
-                NotifyInvalidDrop(Strings.Drop_NotExist);
-            }
-
-            // 与原版一致只处理第一个拖入项，但要明确告知，避免用户以为全部都处理了
-            if (uris.Length > 1) {
-                _hintLabel.Text = string.Format(Strings.Msg_MultipleDropped, uris.Length - 1);
+            catch (Exception ex) {
+                NotifyInvalidDrop(ex.Message);
             }
 
             args.RetVal = true; // 表示事件已处理
         }
 
         /// <summary>
-        /// 拖入内容不可用时给出可见反馈（提示文字 + 对话框）
+        /// 拖入内容不可用时给出可见反馈（提示文字 + 对话框）。
+        /// 必须同时清掉上一次的选择状态：否则会出现"提示说非法、路径标签却还是旧目录、
+        /// 开始按钮还能点"的矛盾状态 —— 用户点下去会对旧目录生成 PDF。
         /// </summary>
         private void NotifyInvalidDrop(string message) {
+            // ResetToInitialState 会把提示改回蓝色初始文案，所以顺序不能颠倒
+            ResetToInitialState();
+            SetPathLabel(Strings.Path_Waiting);
             SetLabelColor(_hintLabel, 200, 0, 0);
             _hintLabel.Text = message;
             MsgBox.Show(this, message, MessageType.Warning, Strings.Msg_ErrorTitle);
@@ -596,40 +707,49 @@ namespace GTK_ImgsToPDF {
                 if (_supportedCompressedExtensions.Contains(extension)) {
                     ProcessArchive(selectedPath);
                 }
+                else {
+                    // "所有文件"过滤器让用户很容易选到非压缩包；不能静默什么都不做，
+                    // 否则界面毫无反应，用户会以为程序卡住了
+                    NotifyInvalidDrop(Strings.Msg_NotAnArchive);
+                }
+            }
+            else {
+                NotifyInvalidDrop(Strings.Drop_NotExist);
             }
         }
 
         // 处理文件夹：识别图片并更新 UI
-        private void ProcessFolder(string folderPath) {
-            _pathLabel.Text = folderPath;
+        private async void ProcessFolder(string folderPath) {
+            SetPathLabel(folderPath);
 
             try {
-                // 查找第一张图片
-                var firstImageFile = Directory.EnumerateFiles(folderPath)
+                // 关键：只要目录存在就允许开始，不要求本层必须有图片。
+                // 递归模式的主要用法正是"选中只有子目录的父目录"，
+                // 由 Core 进程逐个处理子目录（对应原版 ImgsToPDF.cs 对任何存在的目录都启用按钮）。
+                _startBtn.Sensitive = true;
+
+                var candidates = Directory.EnumerateFiles(folderPath)
                     .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file).ToLower()))
                     .OrderBy(file => file, StringComparer.Ordinal)
-                    .FirstOrDefault();
+                    .ToList();
 
-                if (firstImageFile != null) {
-                    _startBtn.Sensitive = true;
+                if (candidates.Count > 0) {
+                    // 预览解码是重活，放到后台线程，避免大图卡住界面
+                    int requestId = ++_previewRequestId;
+                    var preview = await Task.Run(() => LoadFirstUsablePreview(candidates, 420, 420));
 
-                    // 尝试加载预览图（GdkPixbuf 不支持 WebP/TIFF 等格式时回退到 SkiaSharp）
-                    var preview = TryLoadPreviewPixbuf(firstImageFile, 420, 420);
+                    // 解码期间用户可能又选了别的目录，丢弃过期结果
+                    if (requestId != _previewRequestId) {
+                        preview?.Dispose();
+                        return;
+                    }
+
                     if (preview != null) {
-                        // 释放旧的预览图再设置新的
-                        //if (_mainImage.Pixbuf is Pixbuf oldPreview) {
-                        //    oldPreview.Dispose();
-                        //}
-                        //_mainImage.Pixbuf = preview;
-                        //preview.Dispose();
                         var oldPreview = _mainImage.Pixbuf;
                         _mainImage.Pixbuf = preview;
                         oldPreview?.Dispose();
                     }
                     else {
-                        //if (_mainImage.Pixbuf is Pixbuf oldGen) {
-                        //    oldGen.Dispose();
-                        //}
                         var oldGen = _mainImage.Pixbuf;
                         _mainImage.SetFromIconName("image-x-generic", IconSize.Dialog);
                         oldGen?.Dispose();
@@ -637,30 +757,68 @@ namespace GTK_ImgsToPDF {
 
                     SetLabelColor(_hintLabel, 138, 43, 226);
                     _hintLabel.Text = Strings.Hint_Ready;
-
                     _smallFolderIcon.Show();
                 }
                 else {
-                    // 文件夹内没有图片，恢复初始状态或提示
-                    _pathLabel.Text += Strings.Msg_NoImages;
-                    ResetToInitialState();
+                    // 本层没有直属图片。不要再调 ResetToInitialState()：
+                    // 那会把刚刚启用的开始按钮又关掉，导致递归功能彻底不可达。
+                    var oldIcon = _mainImage.Pixbuf;
+                    _mainImage.SetFromIconName("folder", IconSize.Dialog);
+                    oldIcon?.Dispose();
+                    _smallFolderIcon.Hide();
+
+                    bool hasSubDirs = Directory.EnumerateDirectories(folderPath).Any();
+                    if (hasSubDirs) {
+                        // 有子目录：引导用户改用递归，而不是断言"这里没东西"
+                        SetLabelColor(_hintLabel, 138, 43, 226);
+                        _hintLabel.Text = Strings.Hint_NoImagesUseRecursive;
+                    }
+                    else {
+                        SetLabelColor(_hintLabel, 200, 0, 0);
+                        _hintLabel.Text = Strings.Hint_NoImagesAtAll;
+                    }
                 }
             }
             catch (Exception ex) {
                 MsgBox.Show(this, $"{Strings.Msg_ErrProcess}{ex.Message}");
                 ResetToInitialState();
+                SetPathLabel(Strings.Path_Waiting);
             }
+        }
+
+        /// <summary>
+        /// 依次尝试解码候选图片，返回第一张成功的预览图。
+        /// 对应原版 ChooseFileAction 里"坏图就试下一张、成功即 break"的循环 ——
+        /// 只看第一张的话，首图损坏就会退化成通用图标，而目录里明明有能预览的图。
+        /// 本方法在后台线程运行，不得访问任何 GTK 控件。
+        /// </summary>
+        private static Pixbuf? LoadFirstUsablePreview(IEnumerable<string> candidateFiles, int maxWidth, int maxHeight) {
+            foreach (var file in candidateFiles) {
+                var preview = TryLoadPreviewPixbuf(file, maxWidth, maxHeight);
+                if (preview != null) {
+                    return preview;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// 统一设置路径标签与提示气泡，避免超长路径把窗口撑变形（标签已设中间省略）。
+        /// </summary>
+        private void SetPathLabel(string text) {
+            _pathLabel.Text = text;
+            _pathLabel.TooltipText = text;
         }
 
         // 处理压缩包：更新 UI 状态
         private void ProcessArchive(string archivePath) {
-            _pathLabel.Text = archivePath;
+            SetPathLabel(archivePath);
             _startBtn.Sensitive = true;
 
+            // 作废可能仍在后台运行的目录预览，避免它稍后覆盖压缩包图标
+            _previewRequestId++;
+
             // 释放旧的预览图
-            //if (_mainImage.Pixbuf is Pixbuf oldArchiveIcon) {
-            //    oldArchiveIcon.Dispose();
-            //}
             var oldArchiveIcon = _mainImage.Pixbuf;
             // 显示归档图标
             _mainImage.SetFromIconName("package-x-generic", IconSize.Dialog);
@@ -673,11 +831,16 @@ namespace GTK_ImgsToPDF {
             _smallFolderIcon.Hide();
         }
 
+        /// <summary>
+        /// 回到"未选择任何内容"的初始状态。
+        /// 注意：只有"清除选择"与错误回退才应调用它 —— ProcessFolder 在本层找不到
+        /// 图片时不能调用，否则会把刚启用的开始按钮又关掉，使递归功能不可达。
+        /// </summary>
         private void ResetToInitialState() {
+            // 作废可能仍在后台运行的预览加载
+            _previewRequestId++;
+
             // 释放旧的预览图再重置
-            //if (_mainImage.Pixbuf is Pixbuf oldResetIcon) {
-            //    oldResetIcon.Dispose();
-            //}
             var oldResetIcon = _mainImage.Pixbuf;
             _mainImage.SetFromIconName("folder", IconSize.Dialog);
             oldResetIcon?.Dispose();

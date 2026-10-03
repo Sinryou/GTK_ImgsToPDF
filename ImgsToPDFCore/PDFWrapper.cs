@@ -1,8 +1,8 @@
 ﻿using iText.IO.Image;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Action;
+using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Pdf.Navigation;
-using iText.Layout;
 using iText.Kernel.Geom;
 using SkiaSharp;
 
@@ -14,6 +14,9 @@ namespace ImgsToPDFCore {
     }
 
     internal class PDFWrapper {
+        /// <summary>双页模式下两张图之间的中缝宽度（点）。</summary>
+        private const float DuplexPageGap = 10f;
+
         private static readonly string[] SupportedImageExtensions = [
             ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
             ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
@@ -37,7 +40,7 @@ namespace ImgsToPDFCore {
         };
 
         /// <summary>
-        /// 可能带 EXIF 方向标记的格式。只有这些格式需要额外探测是否必须重编码，
+        /// 可能带 EXIF 方向标记的格式。只有这些格式需要额外探测方向，
         /// 其余格式（PNG/BMP/GIF/WebP）的方向由像素本身决定。
         /// </summary>
         private static readonly HashSet<string> ExifOrientationExtensions = new(StringComparer.OrdinalIgnoreCase) {
@@ -45,29 +48,100 @@ namespace ImgsToPDFCore {
         };
 
         /// <summary>
-        /// 非 --fast 模式下，为纠正 EXIF 方向而不得不重编码的 JPEG 所使用的质量。
-        /// 取高值以尽量贴近"不牺牲画质"的语义。
+        /// 非 --fast 模式下，方向属于"镜像类"（2/3/4）而不得不重编码时使用的 JPEG 质量。
+        /// 旋转类（5~8）可以用仿射矩阵表达，不需要重编码。
+        /// 取值来自 config.lua 的 Config.RotatedJpegQuality，缺省 90。
         /// </summary>
-        private const int RotatedJpegQuality = 90;
+        private const int DefaultRotatedJpegQuality = 90;
 
         /// <summary>
-        /// 用 SKCodec 只读元数据判断是否需要按 EXIF 方向旋转，避免为了判断而整图解码。
+        /// 待排入 PDF 的一张图片：iText 图像对象 + 仍需在排版期应用的 EXIF 方向。
+        /// 方向留到排版期而不是解码期，是为了让原始字节（尤其是 JPEG）能无损直通 PDF：
+        /// 解码期旋转必然要重新编码，会带来画质损失与体积膨胀。
         /// </summary>
-        private static bool NeedsExifRotation(byte[] raw, string extension) {
-            if (!ExifOrientationExtensions.Contains(extension)) {
-                return false;
-            }
+        private sealed class PageImage {
+            public required ImageData Image;
+            /// <summary>EXIF Orientation，1 表示无需变换（方向已在解码期烘焙进位图时同样为 1）。</summary>
+            public ushort Orientation = 1;
+
+            /// <summary>应用 EXIF 方向之后的显示宽度。</summary>
+            public float Width => ExifSwapsAxes(Orientation) ? Image.GetHeight() : Image.GetWidth();
+
+            /// <summary>应用 EXIF 方向之后的显示高度。</summary>
+            public float Height => ExifSwapsAxes(Orientation) ? Image.GetWidth() : Image.GetHeight();
+        }
+
+        /// <summary>
+        /// EXIF Orientation 中 5~8 属于转置类变换，显示时宽高互换。
+        /// </summary>
+        private static bool ExifSwapsAxes(ushort orientation) => orientation is 5 or 6 or 7 or 8;
+
+        /// <summary>
+        /// 需要把方向"烘焙"进像素的方向值（2/3/4）。
+        /// 这几种变换含镜像或 180° 旋转，无法用轴对齐的 "a b c d e f" 矩阵表达为
+        /// 缩放矩形，因此必须在解码期完成。
+        /// </summary>
+        private static bool RequiresPixelBake(ushort orientation) => orientation is 2 or 3 or 4;
+
+        /// <summary>
+        /// 计算把图片按 EXIF 方向放进目标矩形 (x, y, width, height) 的仿射矩阵。
+        /// 返回值对应 PDF 的 "a b c d e f cm"：x' = a*u + c*v + e，y' = b*u + d*v + f，
+        /// 其中 (u, v) 为图片单位方格坐标（u 向右、v 向上，与 PDF 图像坐标一致）。
+        /// 各方向由 EXIF 规范里"第 0 行/第 0 列"的定义推导：1 原样、2 水平镜像、3 旋转 180°、
+        /// 4 垂直镜像、5 转置、6 顺时针 90°、7 反转置、8 顺时针 270°。
+        /// </summary>
+        private static float[] GetOrientationMatrix(ushort orientation, float x, float y, float width, float height) {
+            return orientation switch {
+                2 => [-width, 0, 0, height, x + width, y],
+                3 => [-width, 0, 0, -height, x + width, y + height],
+                4 => [width, 0, 0, -height, x, y + height],
+                5 => [0, -height, -width, 0, x + width, y + height],
+                6 => [0, -height, width, 0, x, y + height],
+                7 => [0, height, width, 0, x, y],
+                8 => [0, height, -width, 0, x + width, y],
+                _ => [width, 0, 0, height, x, y],
+            };
+        }
+
+        /// <summary>
+        /// 用仿射矩阵把一张图片放到指定页的指定矩形内（EXIF 方向在此一并应用）。
+        /// 注意 width/height 必须是 <b>显示尺寸</b>（已按方向互换过宽高），
+        /// 因为矩阵作用在图像的单位方格上。
+        /// </summary>
+        private static void DrawImage(PdfCanvas canvas, PageImage pageImage, float x, float y, float width, float height) {
+            float[] m = GetOrientationMatrix(pageImage.Orientation, x, y, width, height);
+            canvas.AddImageWithTransformationMatrix(pageImage.Image, m[0], m[1], m[2], m[3], m[4], m[5]);
+        }
+
+        /// <summary>
+        /// 从 Lua 配置读取一项 JPEG 质量（1~100）；取值非法或读取异常时回落到
+        /// <paramref name="fallback"/>。
+        /// </summary>
+        private static long ReadConfiguredQuality(Func<IConfig, int> selector, long fallback) {
             try {
-                using var stream = new MemoryStream(raw, writable: false);
-                using var codec = SKCodec.Create(stream);
-                // 探测不出方向时按"需要重编码"处理：解码阶段会给出明确错误，
-                // 好过悄悄输出一张方向错误的页面
-                return codec == null || codec.EncodedOrigin != SKEncodedOrigin.TopLeft;
+                if (CSGlobal.luaConfig is IConfig config) {
+                    int q = selector(config);
+                    if (q >= 1 && q <= 100) {
+                        return q;
+                    }
+                }
             }
             catch {
-                return true;
+                // Lua 配置读取异常时安全降级
             }
+            return fallback;
         }
+
+        /// <summary>开启 --fast 时使用的 JPEG 压缩质量，取自 config.lua 的 Config.FastQuality。</summary>
+        private static long GetFastJpegQuality() =>
+            ReadConfiguredQuality(static c => c.FastQuality, 75);
+
+        /// <summary>
+        /// 方向为镜像类（2/3/4）而不得不重编码时使用的 JPEG 压缩质量，
+        /// 取自 config.lua 的 Config.RotatedJpegQuality。取高值以尽量贴近"不牺牲画质"的语义。
+        /// </summary>
+        private static long GetRotatedJpegQuality() =>
+            ReadConfiguredQuality(static c => c.RotatedJpegQuality, DefaultRotatedJpegQuality);
 
         /// <summary>
         /// 用 SkiaSharp 解码。SKImage.FromEncodedData 会自动应用 EXIF 方向
@@ -78,53 +152,59 @@ namespace ImgsToPDFCore {
             return image == null ? null : SKBitmap.FromImage(image);
         }
 
-        // 开启 --fast 时使用的 JPEG 压缩质量，取自 config.lua 的 Config.FastQuality；
-        // 取值非法或读取异常时回落到 75
-        private static long GetFastJpegQuality() {
-            try {
-                int q = CSGlobal.luaConfig != null ? CSGlobal.luaConfig.FastQuality : 0;
-                if (q >= 1 && q <= 100) {
-                    return q;
-                }
-            }
-            catch {
-                // Lua 配置读取异常时安全降级
-            }
-            return 75L;
-        }
-
         /// <summary>
-        /// 载入图片并生成可直接写入 PDF 的 ImageData。
-        /// 非 --fast 且无需纠正方向时走原始字节直通；其余情况才解码重编码。
+        /// 载入图片并生成可直接写入 PDF 的 PageImage。
+        ///
+        /// 非 --fast 模式下的三条路径：
+        /// 1. 无 EXIF 方向，或方向为 1 → 原始字节直通，方向留到排版期（零重编码）；
+        /// 2. 方向为 5~8（转置类）→ 原始字节直通，方向用排版期的仿射矩阵应用（零重编码）；
+        /// 3. 方向为 2~4（镜像/180°）→ 矩阵无法表达，只能解码后烘焙进像素再编码。
+        ///
+        /// --fast 模式下一律解码并按 FastQuality 重编码为 JPEG，以最大化减小体积。
         /// </summary>
-        private static ImageData LoadImageData(string imagePath, bool fastFlag) {
+        private static PageImage LoadPageImage(string imagePath, bool fastFlag) {
             string extension = System.IO.Path.GetExtension(imagePath);
             byte[] raw = File.ReadAllBytes(imagePath);
 
             // TIFF：SkiaSharp 解不了，交给 iText 直通（--fast 下同样不重编码）
             if (TiffExtensions.Contains(extension)) {
-                return ImageDataFactory.Create(raw);
+                return new PageImage { Image = ImageDataFactory.Create(raw) };
             }
 
+            bool isJpeg = ExifOrientationExtensions.Contains(extension);
+
+            // --- 开启 fastFlag：常规格式均压缩为指定质量的 JPEG ---
+            if (fastFlag) {
+                using var fastBitmap = DecodeBitmap(raw)
+                    ?? throw new InvalidOperationException("Unsupported or corrupt image data.");
+                // SKImage.FromEncodedData 已把方向烘焙进像素，这里无需再传 Orientation
+                return new PageImage { Image = ImageDataFactory.Create(EncodeJpegOnWhite(fastBitmap, GetFastJpegQuality())) };
+            }
+
+            // --- 未开启 fastFlag：优先走原始字节无损直通 ---
+            ushort orientation = isJpeg ? JpegExif.GetOrientation(raw) : (ushort)1;
+
+            // 方向为 1（绝大多数素材）或 5~8（可用矩阵表达）→ 直接直通
             bool canPassThrough = PassthroughExtensions.Contains(extension)
-                                  && !NeedsExifRotation(raw, extension);
-
-            if (!fastFlag && canPassThrough) {
-                return ImageDataFactory.Create(raw);
+                                  && !RequiresPixelBake(orientation);
+            if (canPassThrough) {
+                return new PageImage {
+                    Image = ImageDataFactory.Create(raw),
+                    Orientation = orientation
+                };
             }
 
+            // 剩余情况必须解码：方向为 2~4 的 JPEG，以及 iText 不认的 WebP
             using var bitmap = DecodeBitmap(raw)
                 ?? throw new InvalidOperationException("Unsupported or corrupt image data.");
 
-            if (fastFlag) {
-                return ImageDataFactory.Create(EncodeJpegOnWhite(bitmap, GetFastJpegQuality()));
+            if (isJpeg) {
+                // 方向 2~4：SKImage 已按方向重排过像素，直接用较高质量重编码
+                return new PageImage { Image = ImageDataFactory.Create(EncodeJpegOnWhite(bitmap, GetRotatedJpegQuality())) };
             }
 
-            // 非 --fast 但必须按 EXIF 方向重排像素：JPEG 继续输出 JPEG（避免体积暴涨），
-            // 其余格式用 PNG 无损输出
-            return ExifOrientationExtensions.Contains(extension)
-                ? ImageDataFactory.Create(EncodeJpegOnWhite(bitmap, RotatedJpegQuality))
-                : ImageDataFactory.Create(EncodePng(bitmap));
+            // WebP 等：无损 PNG 输出
+            return new PageImage { Image = ImageDataFactory.Create(EncodePng(bitmap)) };
         }
 
         /// <summary>
@@ -152,76 +232,93 @@ namespace ImgsToPDFCore {
                 ?? throw new InvalidOperationException("Failed to encode image to Png.");
         }
 
-        /// <summary>双页拼版等已经在内存中合成过的位图，只能重新编码，没有直通的可能</summary>
-        private static ImageData EncodeBitmap(SKBitmap bitmap, bool fastFlag) {
-            return fastFlag
-                ? ImageDataFactory.Create(EncodeJpegOnWhite(bitmap, GetFastJpegQuality()))
-                : ImageDataFactory.Create(EncodePng(bitmap));
+        /// <summary>
+        /// 把一张图片排成一页。图片通过 PdfCanvas 以仿射矩阵直接放置：
+        /// 未开启 --fast 时原始字节（JPEG 等）无损直通，EXIF 方向也只在此处应用一次，
+        /// 无需重新编码。
+        /// </summary>
+        private static void AddPage(PdfDocument pdfDoc, PageImage pageImage) {
+            // 注意：配置项声明为 Lua 可构造的基类型 Rectangle，需要转成 PageSize 使用。
+            // 置 nil（默认）表示页尺寸跟随图片本身 —— 两版 config.lua 用的 iPageSize.NoResize
+            // 实际并不存在，求值即为 nil，正是这个分支。
+            Rectangle? pageSizeToSave = CSGlobal.luaConfig?.PageSizeToSave;
+
+            float imageWidth = pageImage.Width;
+            float imageHeight = pageImage.Height;
+
+            float drawWidth = imageWidth;
+            float drawHeight = imageHeight;
+            float x = 0f;
+            float y = 0f;
+            PageSize pageSize;
+
+            if (pageSizeToSave != null) {
+                pageSize = new PageSize(pageSizeToSave.GetWidth(), pageSizeToSave.GetHeight());
+                float scale = Math.Min(pageSize.GetWidth() / imageWidth, pageSize.GetHeight() / imageHeight);
+                drawWidth = imageWidth * scale;
+                drawHeight = imageHeight * scale;
+                x = (pageSize.GetWidth() - drawWidth) / 2;
+                y = (pageSize.GetHeight() - drawHeight) / 2;
+            }
+            else {
+                pageSize = new PageSize(imageWidth, imageHeight);
+            }
+
+            var canvas = new PdfCanvas(pdfDoc.AddNewPage(pageSize));
+            DrawImage(canvas, pageImage, x, y, drawWidth, drawHeight);
         }
 
         /// <summary>
-        /// 供双页拼版使用的解码入口：这里必须拿到像素才能拼接
+        /// 把两张竖图并排排入同一页（小说模式的双页）。
+        /// 不再把两张图拼成一张位图：拼图会额外占用一整幅画布的 Skia 内存，
+        /// 且必然经历一次重新编码（画质损失 + 体积膨胀）。这里两张图各自按自身编码放置。
         /// </summary>
-        private static SKBitmap LoadBitmapForCombine(string imagePath) {
-            using var image = SKImage.FromEncodedData(imagePath);
-            return image == null
-                ? throw new InvalidOperationException("Unsupported or corrupt image.")
-                : SKBitmap.FromImage(image);
-        }
+        private static void AddDuplexPage(PdfDocument pdfDoc, PageImage left, PageImage right) {
+            Rectangle? pageSizeToSave = CSGlobal.luaConfig?.PageSizeToSave;
 
-        // 合并两张图片
-        private static SKBitmap CombineBitmap(SKBitmap bm1, SKBitmap bm2, int margin) {
-            var width = bm1.Width + bm2.Width + margin;
-            var height = Math.Max(bm1.Height, bm2.Height);
+            float leftWidth = left.Width;
+            float leftHeight = left.Height;
+            float rightWidth = right.Width;
+            float rightHeight = right.Height;
+            float contentWidth = leftWidth + DuplexPageGap + rightWidth;
+            float contentHeight = Math.Max(leftHeight, rightHeight);
 
-            var surface = SKSurface.Create(new SKImageInfo(width, height));
-            var canvas = surface.Canvas;
-
-            // 白色背景
-            canvas.Clear(SKColors.White);
-
-            // 图片不需要缩放，因此使用默认采样即可
-            var sampling = new SKSamplingOptions(SKFilterMode.Linear);
-
-            // 绘制第一张图
-            canvas.DrawBitmap(bm1, 0, 0, sampling);
-
-            // 绘制第二张图
-            canvas.DrawBitmap(bm2, bm1.Width + margin, 0, sampling);
-
-            var result = SKBitmap.FromImage(surface.Snapshot());
-
-            bm1.Dispose();
-            bm2.Dispose();
-            surface.Dispose();
-
-            return result;
-        }
-
-        // 添加页面到文档
-        private static void AddPage(Document document, PdfDocument pdfDoc, ImageData imageData) {
-            var pageSizeToSave = CSGlobal.luaConfig!.PageSizeToSave;
-
-            PageSize pageSize = pageSizeToSave != null
-                ? new PageSize((float)pageSizeToSave.GetWidth(), (float)pageSizeToSave.GetHeight())
-                : new PageSize(imageData.GetWidth(), imageData.GetHeight());
-
-            document.SetMargins(0, 0, 0, 0);
-
-            var image = new iText.Layout.Element.Image(imageData);
+            PageSize pageSize;
+            float scale = 1f;
+            float offsetX = 0f;
+            float offsetY = 0f;
 
             if (pageSizeToSave != null) {
-                image.ScaleToFit(pageSize.GetWidth(), pageSize.GetHeight());
-                image.SetFixedPosition(
-                    (pageSize.GetWidth() - image.GetImageScaledWidth()) / 2,
-                    (pageSize.GetHeight() - image.GetImageScaledHeight()) / 2
-                );
+                pageSize = new PageSize(pageSizeToSave.GetWidth(), pageSizeToSave.GetHeight());
+                scale = Math.Min(pageSize.GetWidth() / contentWidth, pageSize.GetHeight() / contentHeight);
+                offsetX = (pageSize.GetWidth() - contentWidth * scale) / 2;
+                offsetY = (pageSize.GetHeight() - contentHeight * scale) / 2;
+            }
+            else {
+                pageSize = new PageSize(contentWidth, contentHeight);
             }
 
-            pdfDoc.AddNewPage(pageSize);
-            document.Add(image);
+            var canvas = new PdfCanvas(pdfDoc.AddNewPage(pageSize));
+
+            // 两张图顶部对齐，与旧版拼接位图时的画法保持一致
+            DrawImage(canvas, left,
+                offsetX,
+                offsetY + (contentHeight - leftHeight) * scale,
+                leftWidth * scale,
+                leftHeight * scale);
+            DrawImage(canvas, right,
+                offsetX + (leftWidth + DuplexPageGap) * scale,
+                offsetY + (contentHeight - rightHeight) * scale,
+                rightWidth * scale,
+                rightHeight * scale);
         }
 
+        /// <summary>
+        /// 将指定文件夹下的图片合并为PDF文件
+        /// </summary>
+        /// <param name="directoryPath">文件夹路径</param>
+        /// <param name="layout">合并方式</param>
+        /// <param name="fastFlag">是否以图片质量换取生成速度</param>
         public static void ImagesToPDF(string directoryPath, Layout layout = Layout.Single, bool fastFlag = false) {
             if (!Directory.Exists(directoryPath)) return;   // 不存在文件夹则直接结束执行
 
@@ -240,22 +337,16 @@ namespace ImgsToPDFCore {
             // 2) 中途失败不会用半个文件覆盖掉上一次的正常产物。
             string tempPath = pathToSave + ".tmp";
             try {
+                // 全压缩（对象流 + 交叉引用流），对应原 .NET Framework 版的 writer.SetFullCompression()
+                var writerProperties = new WriterProperties().SetFullCompressionMode(true);
                 using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
-                using (var writer = new PdfWriter(fs))
+                using (var writer = new PdfWriter(fs, writerProperties))
                 using (var pdfDoc = new PdfDocument(writer)) {
-                    pdfDoc.SetFlushUnusedObjects(true);
-                    var document = new Document(pdfDoc);
+                    WritePages(pdfDoc, imagePaths, layout, fastFlag);
 
-                    try {
-                        WritePages(document, pdfDoc, imagePaths, layout, fastFlag);
-
-                        // 如果零页，添加一页空页
-                        if (pdfDoc.GetNumberOfPages() == 0) {
-                            pdfDoc.AddNewPage();
-                        }
-                    }
-                    finally {
-                        document.Close();
+                    // 如果零页，添加一页空页
+                    if (pdfDoc.GetNumberOfPages() == 0) {
+                        pdfDoc.AddNewPage();
                     }
                 }
 
@@ -279,12 +370,12 @@ namespace ImgsToPDFCore {
         /// 逐页写入。单页模式按文件顺序逐张直通/转码；
         /// 双页模式按"横向图单独成页、连续两张纵向图左右拼合"的规则配对。
         /// </summary>
-        private static void WritePages(Document document, PdfDocument pdfDoc, IEnumerable<string> imagePaths,
+        private static void WritePages(PdfDocument pdfDoc, IEnumerable<string> imagePaths,
                                        Layout layout, bool fastFlag) {
             if (layout != Layout.DuplexLeftToRight && layout != Layout.DuplexRightToLeft) {
                 foreach (var imagePath in imagePaths) {
                     try {
-                        AddPage(document, pdfDoc, LoadImageData(imagePath, fastFlag));
+                        AddPage(pdfDoc, LoadPageImage(imagePath, fastFlag));
                     }
                     catch (Exception ex) {
                         ReportImageFailure(imagePath, ex);
@@ -299,7 +390,7 @@ namespace ImgsToPDFCore {
                 // 这里退化为"单独成页"，而不是把整张图丢掉。
                 if (TiffExtensions.Contains(System.IO.Path.GetExtension(enumerator.Current))) {
                     try {
-                        AddPage(document, pdfDoc, LoadImageData(enumerator.Current, fastFlag));
+                        AddPage(pdfDoc, LoadPageImage(enumerator.Current, fastFlag));
                     }
                     catch (Exception ex) {
                         ReportImageFailure(enumerator.Current, ex);
@@ -307,9 +398,9 @@ namespace ImgsToPDFCore {
                     continue;
                 }
 
-                SKBitmap bm1;
+                PageImage bm1;
                 try {
-                    bm1 = LoadBitmapForCombine(enumerator.Current);
+                    bm1 = LoadPageImage(enumerator.Current, fastFlag);
                 }
                 catch (Exception ex) {
                     ReportImageFailure(enumerator.Current, ex);
@@ -318,34 +409,33 @@ namespace ImgsToPDFCore {
 
                 // 横向（长插图页）单独成页
                 if (bm1.Width >= bm1.Height) {
-                    AddPage(document, pdfDoc, EncodeBitmap(bm1, fastFlag));
+                    AddPage(pdfDoc, bm1);
                     continue;
                 }
                 if (!enumerator.MoveNext()) {
-                    AddPage(document, pdfDoc, EncodeBitmap(bm1, fastFlag));
+                    AddPage(pdfDoc, bm1);
                     break;
                 }
 
-                SKBitmap bm2;
+                PageImage bm2;
                 try {
-                    bm2 = LoadBitmapForCombine(enumerator.Current);
+                    bm2 = LoadPageImage(enumerator.Current, fastFlag);
                 }
                 catch (Exception ex) {
                     ReportImageFailure(enumerator.Current, ex);
-                    AddPage(document, pdfDoc, EncodeBitmap(bm1, fastFlag));
+                    AddPage(pdfDoc, bm1);
                     continue;
                 }
 
                 if (bm1.Height >= bm1.Width && bm2.Height >= bm2.Width) {
-                    // 两张都是纵向图：拼成一页
-                    SKBitmap picAtLeft = layout == Layout.DuplexLeftToRight ? bm1 : bm2;
-                    SKBitmap picAtRight = layout == Layout.DuplexLeftToRight ? bm2 : bm1;
-                    using var combined = CombineBitmap(picAtLeft, picAtRight, 10);
-                    AddPage(document, pdfDoc, EncodeBitmap(combined, fastFlag));
+                    // 两张都是纵向图：并排排入同一页，各自保持原有编码
+                    PageImage picAtLeft = layout == Layout.DuplexLeftToRight ? bm1 : bm2;
+                    PageImage picAtRight = layout == Layout.DuplexLeftToRight ? bm2 : bm1;
+                    AddDuplexPage(pdfDoc, picAtLeft, picAtRight);
                 }
                 else {
-                    AddPage(document, pdfDoc, EncodeBitmap(bm1, fastFlag));
-                    AddPage(document, pdfDoc, EncodeBitmap(bm2, fastFlag));
+                    AddPage(pdfDoc, bm1);
+                    AddPage(pdfDoc, bm2);
                 }
             }
         }

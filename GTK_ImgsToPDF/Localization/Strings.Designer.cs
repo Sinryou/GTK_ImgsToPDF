@@ -376,20 +376,65 @@ namespace GTK_ImgsToPDF.Localization {
         }
         
         /// <summary>
-        ///   查找类似  (no images found) 的本地化字符串。
-        /// </summary>
-        internal static string Msg_NoImages {
-            get {
-                return ResourceManager.GetString("Msg_NoImages", resourceCulture);
-            }
-        }
-        
-        /// <summary>
         ///   查找类似 Waiting for drop… 的本地化字符串。
         /// </summary>
         internal static string Path_Waiting {
             get {
                 return ResourceManager.GetString("Path_Waiting", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 PDF generated, but {0} item(s) reported problems 的本地化字符串。
+        /// </summary>
+        internal static string Hint_GeneratedWithSkipped {
+            get {
+                return ResourceManager.GetString("Hint_GeneratedWithSkipped", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 This folder contains no images. 的本地化字符串。
+        /// </summary>
+        internal static string Hint_NoImagesAtAll {
+            get {
+                return ResourceManager.GetString("Hint_NoImagesAtAll", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 No images directly in this folder... 的本地化字符串。
+        /// </summary>
+        internal static string Hint_NoImagesUseRecursive {
+            get {
+                return ResourceManager.GetString("Hint_NoImagesUseRecursive", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 No error output; exit code: {0} 的本地化字符串。
+        /// </summary>
+        internal static string Msg_NoErrorOutput {
+            get {
+                return ResourceManager.GetString("Msg_NoErrorOutput", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 The selected file is not a supported archive format 的本地化字符串。
+        /// </summary>
+        internal static string Msg_NotAnArchive {
+            get {
+                return ResourceManager.GetString("Msg_NotAnArchive", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Warning 的本地化字符串。
+        /// </summary>
+        internal static string Msg_WarningTitle {
+            get {
+                return ResourceManager.GetString("Msg_WarningTitle", resourceCulture);
             }
         }
     }

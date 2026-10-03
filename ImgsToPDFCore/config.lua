@@ -118,6 +118,13 @@ Config.PageSizeToSave = iPageSize.NoResize
 -- @type int
 Config.FastQuality = 75
 
+-- 非 --fast 模式下，为纠正 EXIF 方向而不得不重编码时使用的 JPEG 质量（1~100，默认 90）。
+-- 说明：方向为 1（多数素材）以及转置类方向 5~8 都能让原始字节无损直通 PDF，
+-- 方向由排版期的仿射矩阵应用，不消耗此项；只有镜像类方向 2/3/4 因无法用矩阵表达，
+-- 才需要解码重编码。想完全避免画质损失可设为 100。
+-- @type int
+Config.RotatedJpegQuality = 90
+
 -- func that you can order your input files
 -- 图片文件排序的方法：提取文件名中的数字段做自然排序，
 -- 数字段之间的分隔符不限（. _ - 空格、中文等均可），没有数字的文件排在最前
@@ -206,6 +213,12 @@ function Config:PostProcess()
     if tempExtraPath and pathUtil.dirExist(u2a(tempExtraPath)) then
         pathUtil.deleteDir(u2a(tempExtraPath))
     end
+end
+
+-- 兼容老配置文件：若用户手上的 config.lua 还是升级前的版本（缺 RotatedJpegQuality），
+-- 这里补上默认值，避免 C# 侧读取该字段时报错。
+if Config.RotatedJpegQuality == nil then
+    Config.RotatedJpegQuality = 90
 end
 
 return Config

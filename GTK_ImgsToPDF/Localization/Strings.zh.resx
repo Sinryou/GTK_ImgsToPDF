@@ -184,28 +184,28 @@
     <value>单页</value>
   </data>
   <data name="Menu_About" xml:space="preserve">
-    <value>关于(A)</value>
+    <value>关于(_A)</value>
   </data>
   <data name="Menu_ClearSelection" xml:space="preserve">
-    <value>清除选择(S)</value>
+    <value>清除选择(_S)</value>
   </data>
   <data name="Menu_Config" xml:space="preserve">
-    <value>配置文件(C)</value>
+    <value>配置文件(_C)</value>
   </data>
   <data name="Menu_Exit" xml:space="preserve">
-    <value>退出程序(E)</value>
+    <value>退出程序(_E)</value>
   </data>
   <data name="Menu_File" xml:space="preserve">
-    <value>文件(F)</value>
+    <value>文件(_F)</value>
   </data>
   <data name="Menu_Lang" xml:space="preserve">
-    <value>语言(L)</value>
+    <value>语言(_L)</value>
   </data>
   <data name="Menu_OpenArchive" xml:space="preserve">
-    <value>打开压缩包(Z)</value>
+    <value>打开压缩包(_Z)</value>
   </data>
   <data name="Menu_OpenFolder" xml:space="preserve">
-    <value>打开文件夹(O)</value>
+    <value>打开文件夹(_O)</value>
   </data>
   <data name="Msg_ConfigMissing" xml:space="preserve">
     <value>配置文件不存在！</value>
@@ -222,10 +222,25 @@
   <data name="Msg_MultipleDropped" xml:space="preserve">
     <value>只处理了第一个拖入项（已忽略其余 {0} 项）</value>
   </data>
-  <data name="Msg_NoImages" xml:space="preserve">
-    <value> (未发现图片)</value>
-  </data>
   <data name="Path_Waiting" xml:space="preserve">
     <value>等待拖入……</value>
+  </data>
+  <data name="Msg_WarningTitle" xml:space="preserve">
+    <value>警告</value>
+  </data>
+  <data name="Hint_GeneratedWithSkipped" xml:space="preserve">
+    <value>PDF 已生成，但有 {0} 项报告了问题</value>
+  </data>
+  <data name="Msg_NoErrorOutput" xml:space="preserve">
+    <value>无错误输出；退出码：{0}</value>
+  </data>
+  <data name="Hint_NoImagesUseRecursive" xml:space="preserve">
+    <value>本文件夹内没有直属图片；若有子文件夹，请勾选"递归子文件夹"后再开始。</value>
+  </data>
+  <data name="Hint_NoImagesAtAll" xml:space="preserve">
+    <value>本文件夹内没有图片。</value>
+  </data>
+  <data name="Msg_NotAnArchive" xml:space="preserve">
+    <value>所选文件不是支持的压缩包格式</value>
   </data>
 </root>

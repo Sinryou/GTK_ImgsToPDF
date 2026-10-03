@@ -184,28 +184,28 @@
     <value>Single Page</value>
   </data>
   <data name="Menu_About" xml:space="preserve">
-    <value>About(A)</value>
+    <value>_About</value>
   </data>
   <data name="Menu_ClearSelection" xml:space="preserve">
-    <value>Clear Selection(S)</value>
+    <value>_Clear Selection</value>
   </data>
   <data name="Menu_Config" xml:space="preserve">
-    <value>Config File(C)</value>
+    <value>_Config File</value>
   </data>
   <data name="Menu_Exit" xml:space="preserve">
-    <value>Exit(E)</value>
+    <value>_Exit</value>
   </data>
   <data name="Menu_File" xml:space="preserve">
-    <value>File(F)</value>
+    <value>_File</value>
   </data>
   <data name="Menu_Lang" xml:space="preserve">
-    <value>Language(L)</value>
+    <value>_Language</value>
   </data>
   <data name="Menu_OpenArchive" xml:space="preserve">
-    <value>Open Archive(Z)</value>
+    <value>Open _Archive</value>
   </data>
   <data name="Menu_OpenFolder" xml:space="preserve">
-    <value>Open Folder(O)</value>
+    <value>_Open Folder</value>
   </data>
   <data name="Msg_ConfigMissing" xml:space="preserve">
     <value>Config file not found!</value>
@@ -222,10 +222,25 @@
   <data name="Msg_MultipleDropped" xml:space="preserve">
     <value>Only the first dropped item was processed (ignored {0} more)</value>
   </data>
-  <data name="Msg_NoImages" xml:space="preserve">
-    <value> (no images found)</value>
-  </data>
   <data name="Path_Waiting" xml:space="preserve">
     <value>Waiting for drop…</value>
+  </data>
+  <data name="Msg_WarningTitle" xml:space="preserve">
+    <value>Warning</value>
+  </data>
+  <data name="Hint_GeneratedWithSkipped" xml:space="preserve">
+    <value>PDF generated, but {0} item(s) reported problems</value>
+  </data>
+  <data name="Msg_NoErrorOutput" xml:space="preserve">
+    <value>No error output; exit code: {0}</value>
+  </data>
+  <data name="Hint_NoImagesUseRecursive" xml:space="preserve">
+    <value>No images directly in this folder. Tick "Recursive subfolders" to process its subfolders.</value>
+  </data>
+  <data name="Hint_NoImagesAtAll" xml:space="preserve">
+    <value>This folder contains no images.</value>
+  </data>
+  <data name="Msg_NotAnArchive" xml:space="preserve">
+    <value>The selected file is not a supported archive format</value>
   </data>
 </root>

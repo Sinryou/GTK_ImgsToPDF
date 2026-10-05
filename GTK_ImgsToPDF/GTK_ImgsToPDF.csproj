@@ -23,30 +23,100 @@
     <PackageProjectUrl>https://github.com/Sinryou/GTK_ImgsToPDF</PackageProjectUrl>
   </PropertyGroup>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
-    <Message Text="正在复制 Core 资源文件..." Importance="high" />
+  <!-- ══ Core 子进程管线 ══
+       ImgsToPDFCore 由 GUI 以子进程方式运行（Program.cs 的 GeneratePdfs → Process.Start），
+       它的产物统一由本文件管理：
+       · dotnet build：以框架依赖方式构建 Core（开发机装有 .NET 运行时即可运行），
+         镜像到输出目录 Core\；
+       · dotnet publish：以与 GUI 相同的 RID 把 Core 发布成自包含单文件（Core 用 XLua
+         反射互操作，发布时不做裁剪），镜像到发布目录 Core\。
+       用 MSBuild 任务而非 ProjectReference 触发 Core 构建：ProjectReference 即使
+       ReferenceOutputAssembly=false 也会把 Core 的内容文件/apphost 流入 GUI 输出目录根。
+       两处镜像都先清空目标再全量复制并排除 pdb，保证不残留旧构建文件；
+       因此不要在项目目录下手工放置 Core\ 文件夹。 -->
+  <PropertyGroup>
+    <CoreProjectPath>$(MSBuildThisFileDirectory)..\ImgsToPDFCore\ImgsToPDFCore.csproj</CoreProjectPath>
+    <!-- GUI 未显式指定 RID（如 dotnet publish 不带 -r）时，Core 跟随当前系统 RID -->
+    <_CoreRuntimeIdentifier>$(RuntimeIdentifier)</_CoreRuntimeIdentifier>
+    <_CoreRuntimeIdentifier Condition="'$(_CoreRuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</_CoreRuntimeIdentifier>
+    <!-- obj 下的两处暂存目录，按 配置-平台-RID 分目录：
+         _CoreBuildDir 收 dotnet build 的 Core 产物（框架依赖），
+         _CorePublishStagingDir 收 dotnet publish 的自包含单文件产物。
+         定义放在这里而不是各自的目标里，是为了让清理目标（CleanCoreArtifacts）
+         与构建目标共用同一份路径计算，避免两处各写一遍后走样。 -->
+    <_CoreBuildDir>$([System.IO.Path]::Combine($(MSBuildThisFileDirectory), $(BaseIntermediateOutputPath), 'CoreBuild', '$(Configuration)-$(Platform)-$(_CoreRuntimeIdentifier)'))\</_CoreBuildDir>
+    <_CorePublishStagingDir>$([System.IO.Path]::Combine($(MSBuildThisFileDirectory), $(BaseIntermediateOutputPath), 'CorePublish', '$(Configuration)-$(Platform)-$(_CoreRuntimeIdentifier)'))</_CorePublishStagingDir>
+  </PropertyGroup>
+
+  <!-- dotnet build / F5：构建 Core（框架依赖 + 当前 RID，原生库平铺且只含本平台，
+       快速迭代）并镜像其产物。输出重定向到 obj 下独立目录：与 Core 自己的 bin
+       （SelfContained=true，.NET 10 下 build 也会产出自包含文件）隔离，避免混积。 -->
+  <Target Name="CopyCoreBuildOutput" AfterTargets="Build">
+    <Message Text="正在构建并镜像 Core 组件..." Importance="high" />
+    <RemoveDir Directories="$(_CoreBuildDir)" />
+    <MSBuild Projects="$(CoreProjectPath)"
+             Targets="Restore;Build"
+             Properties="SelfContained=false;RuntimeIdentifier=$(_CoreRuntimeIdentifier);OutputPath=$(_CoreBuildDir);AppendRuntimeIdentifierToOutputPath=false" />
     <ItemGroup>
-      <SourceAssets Include="$(ProjectDir)Core\**\*.*" />
+      <_CoreBuildFiles Include="$(_CoreBuildDir)**\*.*" Exclude="$(_CoreBuildDir)**\*.pdb" />
     </ItemGroup>
-    <Copy SourceFiles="@(SourceAssets)" DestinationFiles="$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)" SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
+    <RemoveDir Directories="$(TargetDir)Core" />
+    <Copy SourceFiles="@(_CoreBuildFiles)"
+          DestinationFiles="@(_CoreBuildFiles->'$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)')"
+          OverwriteReadOnlyFiles="true" />
   </Target>
 
-  <Target Name="RemoveNuGetPdbs" AfterTargets="AfterBuild;Publish" Condition="'$(Configuration)' == 'Release'">
+  <!-- dotnet publish：把 Core 发布成自包含单文件，镜像进发布目录。
+       显式指定 RID 与 SelfContained：Core 作为独立子进程运行，必须自包含，
+       不随 GUI 的发布模式变化；PublishDir 指向 obj 下的暂存目录，避免与
+       Core 自己的发布产物互相污染。 -->
+  <Target Name="PublishCoreAndCopy" AfterTargets="Publish">
+    <Message Text="正在发布 Core（自包含单文件，RID: $(_CoreRuntimeIdentifier)）..." Importance="high" />
+    <RemoveDir Directories="$(_CorePublishStagingDir)" />
+    <MSBuild Projects="$(CoreProjectPath)"
+             Targets="Restore;Publish"
+             Properties="RuntimeIdentifier=$(_CoreRuntimeIdentifier);SelfContained=true;PublishDir=$(_CorePublishStagingDir)" />
+    <PropertyGroup>
+      <_CorePublishDir>$([System.IO.Path]::Combine($(PublishDir), 'Core'))</_CorePublishDir>
+    </PropertyGroup>
+    <RemoveDir Directories="$(_CorePublishDir)" />
+    <ItemGroup>
+      <_CorePublishFiles Include="$(_CorePublishStagingDir)\**\*.*" Exclude="$(_CorePublishStagingDir)\**\*.pdb" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_CorePublishFiles)"
+          DestinationFiles="@(_CorePublishFiles->'$(_CorePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')"
+          OverwriteReadOnlyFiles="true" />
+    <!-- Copy 任务可能不保留可执行位，Linux 下的 Core apphost 需要手动补上 -->
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Linux'))"
+          Command="chmod +x '$(_CorePublishDir)/ImgsToPDFCore'"
+          IgnoreExitCode="true" />
+  </Target>
+
+  <!-- 发布项里过滤掉全部 pdb：都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），
+       运行时用不到。挂在 ComputeFilesToPublish 之后，pdb 根本不会进发布目录。 -->
+  <Target Name="RemovePublishPdbs" AfterTargets="ComputeFilesToPublish">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Release 构建时清理 bin 下由 NuGet 带进来的原生符号文件 -->
+  <Target Name="RemoveNuGetPdbs" AfterTargets="AfterBuild" Condition="'$(Configuration)' == 'Release'">
     <ItemGroup>
       <_PdbsToRemove Include="$(TargetDir)**\*.pdb" />
     </ItemGroup>
     <Delete Files="@(_PdbsToRemove)" />
   </Target>
 
-  <ItemGroup>
-    <Compile Remove="Core\**" />
-    <EmbeddedResource Remove="Core\**" />
-    <None Remove="Core\**" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Content Include="pimejaSike.ico" />
-  </ItemGroup>
+  <!-- 清理 Core 的镜像目录与两处 obj 暂存目录。
+       这三处都在 SDK 的标准输出路径之外：Copy 任务的产物不会自动进 FileWrites，
+       IncrementalClean 记录文件清单又发生在本项目的 AfterTargets="Build" 之前，
+       所以不显式清理的话，dotnet clean 之后 bin 里仍会留着一份完整可运行的旧 Core
+       （配置/平台/RID 变更后尤其容易误用），obj 下的暂存也会一直堆积。
+       暂存目录按 配置-平台-RID 精确清理，粒度与 dotnet clean 一致，不误伤其他配置。 -->
+  <Target Name="CleanCoreArtifacts" AfterTargets="Clean">
+    <RemoveDir Directories="$(TargetDir)Core;$(_CoreBuildDir);$(_CorePublishStagingDir)" />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
@@ -76,6 +146,10 @@
       <Generator>ResXFileCodeGenerator</Generator>
       <LastGenOutput>Resources.Designer.cs</LastGenOutput>
     </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="pimejaSike.ico" />
   </ItemGroup>
 
 </Project>

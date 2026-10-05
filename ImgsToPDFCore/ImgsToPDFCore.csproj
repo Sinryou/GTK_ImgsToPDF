@@ -12,8 +12,8 @@
     <PublishProtocol>FileSystem</PublishProtocol>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>True</PublishSingleFile>
-    <PublishTrimmed>True</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <!-- 刻意不开 PublishTrimmed：XLua 通过反射桥接 C#/Lua（CSGlobal.lua_call_cs_list、
+         IConfig 的 CSharpCallLua），裁剪会剥掉仅被反射使用的类型，Lua 调 C# 处会运行时崩溃。 -->
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <AssemblyVersion>1.0.1.0</AssemblyVersion>
     <FileVersion>1.0.1.0</FileVersion>
@@ -23,21 +23,10 @@
     <PackageProjectUrl>https://github.com/Sinryou/GTK_ImgsToPDF</PackageProjectUrl>
   </PropertyGroup>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(SolutionDir)' != '' and '$(SolutionDir)' != '*Undefined*'">
-    <Message Text="正在同步 Core 组件..." Importance="high" />
-    <ItemGroup>
-      <CoreFiles Include="$(TargetDir)**\*.*" />
-    </ItemGroup>
-    <Copy SourceFiles="@(CoreFiles)" DestinationFiles="$(SolutionDir)GTK_ImgsToPDF\Core\%(RecursiveDir)%(Filename)%(Extension)" SkipUnchangedFiles="true" OverwriteReadOnlyFiles="true" />
-  </Target>
-
-  <Target Name="RemoveNuGetPdbs" AfterTargets="AfterBuild;Publish" Condition="'$(Configuration)' == 'Release'">
-    <ItemGroup>
-      <_PdbsToRemove Include="$(TargetDir)**\*.pdb" />
-    </ItemGroup>
-    <Delete Files="@(_PdbsToRemove)" />
-  </Target>
-
+  <!-- 本项目的构建/发布产物由 GUI（GTK_ImgsToPDF.csproj）用 MSBuild 任务触发并统一
+       镜像进 GUI 的输出目录；此处不做任何复制。
+       刻意不用 ProjectReference：即使 ReferenceOutputAssembly=false，Core 的内容文件
+       与 apphost 也会流进 GUI 输出目录根，破坏 Core\ 子目录的布局（详见 GUI 侧注释）。 -->
   <ItemGroup>
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="itext" Version="9.8.0" />
@@ -46,6 +35,21 @@
     <PackageReference Include="SkiaSharp" Version="4.153.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
   </ItemGroup>
+
+  <!-- 原生库（xlua.dll / libxlua.so 二选一）的目标平台判定。
+       不能直接用 $(RuntimeIdentifier)：CLI 不带 -r 时（IDE 直接构建本项目、构建整个
+       解决方案都属于这种情况），SDK 要到 Microsoft.NET.RuntimeIdentifierInference.targets
+       （在项目 body 之后导入）才由 SelfContained=true 推断出 RID，body 求值时它还是空的。
+       若照旧按"空即 Windows"处理，Linux 上不带 -r 的构建就会把 PE 格式的 xlua.dll 当成
+       Linux 原生库拷进输出、同时漏掉 libxlua.so，运行时加载不到 lua。
+       因此按 GUI（GTK_ImgsToPDF.csproj）同样的方式补一次推断：RID 为空时取 SDK 自身的 RID
+       （NETCoreSdkRuntimeIdentifier 来自 SDK props，body 阶段已可用，必然非空）。
+       显式传 -r、或 GUI 用 MSBuild 任务嵌套调用时，RID 是全局属性，body 阶段就能看到，
+       因此交叉发布（如 Windows 上发布 linux-x64）仍严格按目标 RID 选择。 -->
+  <PropertyGroup>
+    <_TargetRuntimeIdentifier Condition="'$(_TargetRuntimeIdentifier)' == ''">$(RuntimeIdentifier)</_TargetRuntimeIdentifier>
+    <_TargetRuntimeIdentifier Condition="'$(_TargetRuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</_TargetRuntimeIdentifier>
+  </PropertyGroup>
 
   <ItemGroup>
     <None Update="config.lua">
@@ -66,19 +70,20 @@
     <None Update="Modules\VisualGTK.lua">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="xlua.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <!-- 原生库按 _TargetRuntimeIdentifier 二选一，判定依据见该属性的定义处 -->
+    <None Update="xlua.dll" Condition="$(_TargetRuntimeIdentifier.Contains('win'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="libxlua.so" Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <None Update="libxlua.so" Condition="!$(_TargetRuntimeIdentifier.Contains('win'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="xlua.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Include="xlua.dll" Condition="$(_TargetRuntimeIdentifier.Contains('win'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-    <Content Update="libxlua.so" Condition="!$([MSBuild]::IsOSPlatform('Windows'))">
+    <Content Update="libxlua.so" Condition="!$(_TargetRuntimeIdentifier.Contains('win'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="XLua.Mini.dll" />

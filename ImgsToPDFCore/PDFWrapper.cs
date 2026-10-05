@@ -17,10 +17,15 @@ namespace ImgsToPDFCore {
         /// <summary>双页模式下两张图之间的中缝宽度（点）。</summary>
         private const float DuplexPageGap = 10f;
 
-        private static readonly string[] SupportedImageExtensions = [
+        /// <summary>
+        /// 支持的图片扩展名。用 OrdinalIgnoreCase 比较而不是 ToLower()：
+        /// 扩展名来自文件系统，与当前区域设置无关 —— tr-TR 下 "I".ToLower() 是无点 "ı"，
+        /// 会把 ".TIF" 判成不支持而静默丢图；顺带省掉每个文件一次 ToLower 分配。
+        /// </summary>
+        private static readonly HashSet<string> SupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase) {
             ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
             ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
-        ];
+        };
 
         /// <summary>
         /// iText 能直接嵌入 PDF 的格式：这些格式在非 --fast 模式下走"原始字节直通"，
@@ -323,7 +328,7 @@ namespace ImgsToPDFCore {
             if (!Directory.Exists(directoryPath)) return;   // 不存在文件夹则直接结束执行
 
             var imagePaths = Directory.EnumerateFiles(directoryPath)
-                .Where(p => SupportedImageExtensions.Any(e => System.IO.Path.GetExtension(p)?.ToLower() == e))
+                .Where(p => SupportedImageExtensions.Contains(System.IO.Path.GetExtension(p)))
                 .OrderBy(p => p, new StringLenComparer());
 
             string? pathToSave = CSGlobal.luaConfig!.PathToSave();
@@ -512,7 +517,8 @@ namespace ImgsToPDFCore {
                     parentNode = folderNameOutline;
                 }
 
-                if (fileName != folderName) {
+                // 文件名与所在文件夹同名时不再重复建条目；仅大小写不同视为同一个名字
+                if (!string.Equals(fileName, folderName, StringComparison.OrdinalIgnoreCase)) {
                     var action = PdfAction.CreateGoTo(
                         PdfExplicitDestination.CreateFitH(
                             outputPdf.GetPage(currentPage), 0
@@ -583,8 +589,8 @@ namespace ImgsToPDFCore {
                 // 获取父文件夹名（pathParts 的最后一个文件夹层级）
                 string? parentFolderName = pathParts.Length >= 2 ? pathParts[^2] : null;
 
-                // 只有文件名与父文件夹名不同时，才创建文件书签
-                if (fileName != parentFolderName) {
+                // 只有文件名与父文件夹名不同时，才创建文件书签；仅大小写不同视为同一个名字
+                if (!string.Equals(fileName, parentFolderName, StringComparison.OrdinalIgnoreCase)) {
                     var fileAction = PdfAction.CreateGoTo(
                         PdfExplicitDestination.CreateFitH(
                             outputPdf.GetPage(startPage), 0

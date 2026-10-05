@@ -24,9 +24,16 @@ namespace GTK_ImgsToPDF {
         private CheckButton _mergeCheck = null!;
         private ComboBoxText _layoutCombo = null!;
 
-        // 定义支持的文件扩展名
-        private readonly string[] _supportedExtensions = [".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng"];
-        private readonly string[] _supportedCompressedExtensions = [".zip", ".rar", ".7z"];
+        // 定义支持的文件扩展名。
+        // 用 OrdinalIgnoreCase 比较而不是 ToLower()：扩展名与当前区域设置无关
+        // （tr-TR 下 "I".ToLower() 是无点 "ı"，".TIF" 会被误判为不支持），
+        // 同时省掉每个文件一次 ToLower 分配。
+        private readonly HashSet<string> _supportedExtensions = new(StringComparer.OrdinalIgnoreCase) {
+            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng"
+        };
+        private readonly HashSet<string> _supportedCompressedExtensions = new(StringComparer.OrdinalIgnoreCase) {
+            ".zip", ".rar", ".7z"
+        };
         private CssProvider? _hintStyleProvider;
 
         /// <summary>
@@ -148,7 +155,7 @@ namespace GTK_ImgsToPDF {
             };
             langSub.Append(menuItemLangEN);
 
-            if (Thread.CurrentThread.CurrentUICulture.Name.StartsWith("zh")) {
+            if (Thread.CurrentThread.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)) {
                 menuItemLangCN.Sensitive = false;
             }
             else {
@@ -594,7 +601,7 @@ namespace GTK_ImgsToPDF {
                     ProcessFolder(folderPath);
                 }
                 else if (File.Exists(folderPath)) {
-                    string extension = System.IO.Path.GetExtension(folderPath).ToLower();
+                    string extension = System.IO.Path.GetExtension(folderPath);
                     if (_supportedCompressedExtensions.Contains(extension)) {
                         ProcessArchive(folderPath);
                     }
@@ -703,7 +710,7 @@ namespace GTK_ImgsToPDF {
             }
 
             if (File.Exists(selectedPath)) {
-                string extension = System.IO.Path.GetExtension(selectedPath).ToLower();
+                string extension = System.IO.Path.GetExtension(selectedPath);
                 if (_supportedCompressedExtensions.Contains(extension)) {
                     ProcessArchive(selectedPath);
                 }
@@ -729,7 +736,7 @@ namespace GTK_ImgsToPDF {
                 _startBtn.Sensitive = true;
 
                 var candidates = Directory.EnumerateFiles(folderPath)
-                    .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file).ToLower()))
+                    .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file)))
                     .OrderBy(file => file, StringComparer.Ordinal)
                     .ToList();
 
@@ -993,7 +1000,8 @@ namespace GTK_ImgsToPDF {
 
         [STAThread]
         public static void Main(string[] args) {
-            bool restarted = args.Contains(RestartArgument);
+            // 命令行开关按 Windows 惯例不区分大小写
+            bool restarted = args.Contains(RestartArgument, StringComparer.OrdinalIgnoreCase);
 
             using Mutex mutex = new(true, @"GTK_ImgsToPDF", out bool isFirstInstance);
 

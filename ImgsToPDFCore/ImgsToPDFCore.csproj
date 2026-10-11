@@ -16,7 +16,7 @@
          IConfig 的 CSharpCallLua），裁剪会剥掉仅被反射使用的类型，Lua 调 C# 处会运行时崩溃。 -->
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <FileVersion>1.1.0.0</FileVersion>
     <Company>Sinryou</Company>
     <Authors>Sinryou</Authors>
     <Description>ImgsToPDF 核心命令行处理模块</Description>

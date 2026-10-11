@@ -1,4 +1,4 @@
-﻿using ImgsToPDFCore;
+using ImgsToPDFCore;
 using XLua;
 
 /// <summary>

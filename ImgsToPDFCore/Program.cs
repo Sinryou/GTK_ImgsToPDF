@@ -1,4 +1,4 @@
-﻿using CommandLine;
+using CommandLine;
 using XLua;
 
 namespace ImgsToPDFCore {

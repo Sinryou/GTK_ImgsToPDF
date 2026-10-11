@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 
 namespace GTK_ImgsToPDF.Config {
     internal sealed class ConfigService {

@@ -1,4 +1,4 @@
-﻿using Gtk;
+using Gtk;
 
 namespace GTK_ImgsToPDF {
     internal static class MsgBox {

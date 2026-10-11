@@ -18,7 +18,7 @@
     <PublishTrimmed>True</PublishTrimmed>
     <TrimMode>partial</TrimMode>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <FileVersion>1.0.6.0</FileVersion>
     <Authors>Sinryou</Authors>
     <Company>Sinryou</Company>
@@ -108,20 +108,11 @@
     <GtkRuntimeSource Condition="'$(GtkRuntimeSource)' == '' and '$(OS)' == 'Windows_NT'">$(LOCALAPPDATA)\Gtk\$(GtkRuntimeVersion)</GtkRuntimeSource>
   </PropertyGroup>
 
-  <Target Name="PublishGtkRuntime" AfterTargets="Publish"
-          Condition="'$(OS)' == 'Windows_NT' and '$(GtkRuntimeSource)' != ''">
-    <Warning Condition="!Exists('$(GtkRuntimeSource)')"
-             Text="未找到 GTK3 运行时 '$(GtkRuntimeSource)'，发布产物将不含 runtime\，在未安装 GTK3 的 Windows 机器上无法启动。请用 -p:GtkRuntimeSource=&lt;路径&gt; 指定（例如从 gvsbuild release 解压出的目录）。" />
+  <Target Name="PublishGtkRuntime" AfterTargets="Publish" Condition="'$(OS)' == 'Windows_NT' and '$(GtkRuntimeSource)' != ''">
+    <Warning Condition="!Exists('$(GtkRuntimeSource)')" Text="未找到 GTK3 运行时 '$(GtkRuntimeSource)'，发布产物将不含 runtime\，在未安装 GTK3 的 Windows 机器上无法启动。请用 -p:GtkRuntimeSource=&lt;路径&gt; 指定（例如从 gvsbuild release 解压出的目录）。" />
 
     <ItemGroup Condition="Exists('$(GtkRuntimeSource)')">
-      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*"
-                        Exclude="$(GtkRuntimeSource)\*.exe;
-                                 $(GtkRuntimeSource)\gtk.zip;
-                                 $(GtkRuntimeSource)\gtk3-runtime\**;
-                                 $(GtkRuntimeSource)\ssl\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
+      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*" Exclude="$(GtkRuntimeSource)\*.exe;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk.zip;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk3-runtime\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\ssl\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
     </ItemGroup>
 
     <PropertyGroup>
@@ -129,12 +120,8 @@
     </PropertyGroup>
 
     <RemoveDir Directories="$(_GtkRuntimePublishDir)" Condition="Exists('$(GtkRuntimeSource)')" />
-    <Copy Condition="Exists('$(GtkRuntimeSource)')"
-          SourceFiles="@(_GtkRuntimeFiles)"
-          DestinationFiles="@(_GtkRuntimeFiles->'$(_GtkRuntimePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')"
-          SkipUnchangedFiles="true" />
-    <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high"
-             Text="已镜像 GTK3 运行时（@(_GtkRuntimeFiles->Count()) 个文件）到 $(_GtkRuntimePublishDir)" />
+    <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeFiles)" DestinationFiles="@(_GtkRuntimeFiles->'$(_GtkRuntimePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high" Text="已镜像 GTK3 运行时（@(_GtkRuntimeFiles-&gt;Count()) 个文件）到 $(_GtkRuntimePublishDir)" />
   </Target>
 
   <!-- 发布项里过滤掉全部 pdb：都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），

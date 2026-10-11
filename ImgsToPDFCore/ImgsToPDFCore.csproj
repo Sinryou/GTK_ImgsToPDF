@@ -15,7 +15,7 @@
     <!-- 刻意不开 PublishTrimmed：XLua 通过反射桥接 C#/Lua（CSGlobal.lua_call_cs_list、
          IConfig 的 CSharpCallLua），裁剪会剥掉仅被反射使用的类型，Lua 调 C# 处会运行时崩溃。 -->
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
-    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <FileVersion>1.0.1.0</FileVersion>
     <Company>Sinryou</Company>
     <Authors>Sinryou</Authors>

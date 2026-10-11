@@ -52,6 +52,22 @@ namespace ImgsToPDFCore {
             }
         }
 
+        /// <summary>
+        /// 从完整的 TIFF 字节中读取 EXIF Orientation。
+        /// TIFF 文件头本身即为 ParseTiffOrientation 所解析的 II/MM + 42 + IFD 结构。
+        /// </summary>
+        public static ushort GetTiffOrientation(byte[] raw) {
+            if (raw == null || raw.Length < 8) {
+                return 1;
+            }
+            try {
+                return ParseTiffOrientation(raw, 0, raw.Length);
+            }
+            catch {
+                return 1;
+            }
+        }
+
         private static ushort ParseOrientation(byte[] raw) {
             // 最短的 JPEG 也要有 SOI + 至少一个段
             if (raw.Length < 4 || raw[0] != MarkerPrefix || raw[1] != SoiMarker) {

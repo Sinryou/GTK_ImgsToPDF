@@ -12,5 +12,15 @@ namespace GTK_ImgsToPDF {
             md.Run();
             md.Destroy();
         }
+
+        public static bool Confirm(Window parent, string message, string? title = null) {
+            MessageDialog md = new(parent, DialogFlags.Modal, MessageType.Question, ButtonsType.YesNo, message);
+            if (!string.IsNullOrEmpty(title)) {
+                md.Title = title;
+            }
+            int response = md.Run();
+            md.Destroy();
+            return response == (int)ResponseType.Yes;
+        }
     }
 }

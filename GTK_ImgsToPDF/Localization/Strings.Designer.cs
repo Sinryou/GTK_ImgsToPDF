@@ -437,5 +437,14 @@ namespace GTK_ImgsToPDF.Localization {
                 return ResourceManager.GetString("Msg_WarningTitle", resourceCulture);
             }
         }
+        
+        /// <summary>
+        ///   查找类似 PDF generation is in progress. Are you sure you want to exit? 的本地化字符串。
+        /// </summary>
+        internal static string Msg_WarnGenerating {
+            get {
+                return ResourceManager.GetString("Msg_WarnGenerating", resourceCulture);
+            }
+        }
     }
 }

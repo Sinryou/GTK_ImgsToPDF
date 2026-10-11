@@ -19,10 +19,18 @@ namespace GTK_ImgsToPDF {
         private Label _pathLabel = null!;       // 显示 E:\Temp
         private Image _smallFolderIcon = null!; // 叠加的小文件夹图标
         private Button _startBtn = null!;
+        private ProgressBar _progressBar = null!;
         private CheckButton _lossyCheck = null!;
         private CheckButton _recursiveCheck = null!;
         private CheckButton _mergeCheck = null!;
         private ComboBoxText _layoutCombo = null!;
+        private MenuItem _openFolderItem = null!;
+        private MenuItem _openArchiveItem = null!;
+        private MenuItem _clearChosenItem = null!;
+        private MenuItem _configFileItem = null!;
+        private MenuItem _langItem = null!;
+        private bool _isProcessing;
+        private bool _hasValidSelection;
 
         // 定义支持的文件扩展名。
         // 用 OrdinalIgnoreCase 比较而不是 ToLower()：扩展名与当前区域设置无关
@@ -55,7 +63,13 @@ namespace GTK_ImgsToPDF {
 
             SetDefaultSize(800, 600);
             SetPosition(WindowPosition.Center);
-            this.DeleteEvent += (s, e) => Application.Quit();
+            this.DeleteEvent += (s, e) => {
+                if (!ConfirmExit()) {
+                    e.RetVal = true;
+                    return;
+                }
+                Application.Quit();
+            };
 
             // 窗口图标：csproj 的 ApplicationIcon 只管可执行文件本身，
             // 标题栏与任务栏图标需要在这里显式设置
@@ -80,8 +94,16 @@ namespace GTK_ImgsToPDF {
 
             ShowAll();
 
-            // 初始状态下隐藏叠加的小图标
+            // 初始状态下隐藏叠加的小图标与进度条
             _smallFolderIcon.Hide();
+            _progressBar.Hide();
+        }
+
+        private bool ConfirmExit() {
+            if (!_isProcessing) {
+                return true;
+            }
+            return MsgBox.Confirm(this, Strings.Msg_WarnGenerating, Strings.Msg_WarningTitle);
         }
 
         private MenuBar CreateMenuBar() {
@@ -92,32 +114,42 @@ namespace GTK_ImgsToPDF {
             MenuItem fileMenu = new(Strings.Menu_File) { UseUnderline = true };
             Menu fileSub = [];
 
-            MenuItem openFolderItem = new(Strings.Menu_OpenFolder) { UseUnderline = true };
-            openFolderItem.Activated += (s, e) => SelectFolder();
-            fileSub.Append(openFolderItem);
+            _openFolderItem = new(Strings.Menu_OpenFolder) { UseUnderline = true };
+            _openFolderItem.Activated += (s, e) => SelectFolder();
+            fileSub.Append(_openFolderItem);
 
-            MenuItem openArchiveItem = new(Strings.Menu_OpenArchive) { UseUnderline = true };
-            openArchiveItem.Activated += (s, e) => SelectArchive();
-            fileSub.Append(openArchiveItem);
+            _openArchiveItem = new(Strings.Menu_OpenArchive) { UseUnderline = true };
+            _openArchiveItem.Activated += (s, e) => SelectArchive();
+            fileSub.Append(_openArchiveItem);
 
-            MenuItem clearChosenItem = new(Strings.Menu_ClearSelection) { UseUnderline = true };
-            clearChosenItem.Activated += (s, e) => {
+            _clearChosenItem = new(Strings.Menu_ClearSelection) { UseUnderline = true };
+            _clearChosenItem.Activated += (s, e) => {
+                if (_isProcessing) {
+                    return;
+                }
                 SetPathLabel(Strings.Path_Waiting);
                 ResetToInitialState();
             };
-            fileSub.Append(clearChosenItem);
+            fileSub.Append(_clearChosenItem);
 
             fileSub.Append(new SeparatorMenuItem());
 
             MenuItem quitItem = new(Strings.Menu_Exit) { UseUnderline = true };
-            quitItem.Activated += (s, e) => Application.Quit();
+            quitItem.Activated += (s, e) => {
+                if (ConfirmExit()) {
+                    Application.Quit();
+                }
+            };
             fileSub.Append(quitItem);
             fileMenu.Submenu = fileSub;
 
             menuBar.Append(fileMenu);
 
-            MenuItem configFileItem = new(Strings.Menu_Config) { UseUnderline = true };
-            configFileItem.Activated += (s, e) => {
+            _configFileItem = new(Strings.Menu_Config) { UseUnderline = true };
+            _configFileItem.Activated += (s, e) => {
+                if (_isProcessing) {
+                    return;
+                }
                 string cfgFilePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", "config.lua");
                 if (!File.Exists(cfgFilePath)) {
                     MsgBox.Show(this, Strings.Msg_ConfigMissing);
@@ -132,9 +164,9 @@ namespace GTK_ImgsToPDF {
                     MsgBox.Show(this, ex.Message);
                 }
             };
-            menuBar.Append(configFileItem);
+            menuBar.Append(_configFileItem);
 
-            MenuItem langItem = new(Strings.Menu_Lang) { UseUnderline = true };
+            _langItem = new(Strings.Menu_Lang) { UseUnderline = true };
             Menu langSub = [];
 
             MenuItem menuItemLangCN = new("中文(CN)");
@@ -162,8 +194,8 @@ namespace GTK_ImgsToPDF {
                 menuItemLangEN.Sensitive = false;
             }
 
-            langItem.Submenu = langSub;
-            menuBar.Append(langItem);
+            _langItem.Submenu = langSub;
+            menuBar.Append(_langItem);
 
             MenuItem aboutItem = new(Strings.Menu_About) { UseUnderline = true };
             aboutItem.Activated += OnAboutClicked;
@@ -235,6 +267,14 @@ namespace GTK_ImgsToPDF {
             _dropTarget.DragMotion += OnDragMotion;
             _dropTarget.DragLeave += OnDragLeave;
             _dropTarget.DragDataReceived += OnDragDataReceived;
+            _dropTarget.ButtonPressEvent += (o, args) => {
+                if (_isProcessing) {
+                    return;
+                }
+                if (args.Event.Button == 1 && args.Event.Type == EventType.ButtonPress) {
+                    SelectFolder();
+                }
+            };
 
             // 高亮样式只需注册一次；AddProviderForScreen 是静态方法，无需保留字段
             Gtk.StyleContext.AddProviderForScreen(Gdk.Screen.Default, CreateDropHighlightProvider(), Gtk.StyleProviderPriority.User);
@@ -267,6 +307,23 @@ namespace GTK_ImgsToPDF {
             SetDropHighlight(false);
         }
 
+        private void SetUiState(bool isProcessing) {
+            _isProcessing = isProcessing;
+            bool enabled = !isProcessing;
+
+            _startBtn.Sensitive = enabled && _hasValidSelection;
+            _layoutCombo.Sensitive = enabled;
+            _lossyCheck.Sensitive = enabled;
+            _recursiveCheck.Sensitive = enabled;
+            _mergeCheck.Sensitive = enabled && _recursiveCheck.Active;
+
+            _openFolderItem.Sensitive = enabled;
+            _openArchiveItem.Sensitive = enabled;
+            _clearChosenItem.Sensitive = enabled;
+            _configFileItem.Sensitive = enabled;
+            _langItem.Sensitive = enabled;
+        }
+
         private Box CreateBottomControls() {
             // 底部控制栏布局 (与前一个代码示例类似，增加了进度条)
             Box bottomBox = new(Orientation.Vertical, spacing: 10) {
@@ -287,7 +344,7 @@ namespace GTK_ImgsToPDF {
             // 3. 编写联动逻辑：当递归勾选状态改变时触发
             _recursiveCheck.Toggled += (s, e) => {
                 // 只有当“递归子文件夹”被勾选时，“合并子PDF”才可用
-                _mergeCheck.Sensitive = _recursiveCheck.Active;
+                _mergeCheck.Sensitive = !_isProcessing && _recursiveCheck.Active;
                 // 可选：如果取消勾选递归，自动也取消勾选合并（防止逻辑冲突）
                 if (!_recursiveCheck.Active) {
                     _mergeCheck.Active = false;
@@ -315,13 +372,17 @@ namespace GTK_ImgsToPDF {
             _startBtn.SetSizeRequest(100, -1);
             _startBtn.Sensitive = false;
 
-            ProgressBar progressBar = new() {
+            _progressBar = new() {
                 Valign = Align.Center // 设置垂直居中
             };
-            progressBar.Hide(); // 关键：初始状态不可见
-            progressBar.Fraction = 0.0; // 初始进度为 0
+            _progressBar.Hide(); // 关键：初始状态不可见
+            _progressBar.Fraction = 0.0; // 初始进度为 0
 
             _startBtn.Clicked += async (s, e) => {
+                if (_isProcessing) {
+                    return;
+                }
+
                 // ① 先在主线程把控件状态取成局部变量。
                 //    GTK 控件不是线程安全的，后台任务只能读这些快照，不能直接访问控件。
                 string directoryPath = _pathLabel.Text;
@@ -331,16 +392,16 @@ namespace GTK_ImgsToPDF {
                 int layoutIndex = _layoutCombo.Active;
 
                 _hintLabel.Text = Strings.Hint_Generating;
-                // 切换为可见状态
-                progressBar.Visible = true;
-                progressBar.Fraction = 0.5;
-                _startBtn.Sensitive = false;
+                // 切换为可见状态并锁定控件
+                _progressBar.Visible = true;
+                _progressBar.Fraction = 0.5;
+                SetUiState(true);
 
                 try {
                     var (failures, warnings) = await Task.Run(() =>
                         GeneratePdfs(directoryPath, recursive, fastMode, merge, layoutIndex));
 
-                    progressBar.Fraction = 1.0;
+                    _progressBar.Fraction = 1.0;
 
                     if (failures.Count > 0) {
                         // 有错误时不能再无条件显示"已输出"，要让用户看到实际结果
@@ -368,19 +429,19 @@ namespace GTK_ImgsToPDF {
                     }
                 }
                 catch (Exception ex) {
-                    progressBar.Fraction = 1.0;
+                    _progressBar.Fraction = 1.0;
                     SetLabelColor(_hintLabel, 200, 0, 0);
                     _hintLabel.Text = string.Format(Strings.Hint_Failed, ex.Message);
                     MsgBox.Show(this, ex.Message, MessageType.Error, Strings.Msg_ErrorTitle);
                 }
                 finally {
-                    // 无论成功还是出错都恢复按钮可用状态，避免界面卡死
-                    _startBtn.Sensitive = true;
+                    // 无论成功还是出错都恢复控件可用状态，避免界面卡死
+                    SetUiState(false);
                 }
             };
             actionBox.PackStart(_startBtn, false, true, 20);
 
-            actionBox.PackStart(progressBar, true, true, 20);
+            actionBox.PackStart(_progressBar, true, true, 20);
 
             bottomBox.PackStart(actionBox, false, false, 0);
             return bottomBox;
@@ -537,6 +598,11 @@ namespace GTK_ImgsToPDF {
             p.StartInfo.RedirectStandardInput = true;   // 重定向输入
             p.StartInfo.RedirectStandardOutput = true;  // 重定向输出
             p.StartInfo.RedirectStandardError = true;   // 重定向输出错误
+            // 子进程在 Program.Main 中把 Console 输出编码固定为 UTF-8（无 BOM），
+            // 这里必须配套以 UTF-8 解码，否则中文路径或错误信息在 GBK 等系统代码页下会变乱码。
+            var utf8NoBom = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            p.StartInfo.StandardOutputEncoding = utf8NoBom;
+            p.StartInfo.StandardErrorEncoding = utf8NoBom;
             p.StartInfo.CreateNoWindow = true;          // 设置不显示窗口
             p.StartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(fileName);
             p.Start();
@@ -559,6 +625,13 @@ namespace GTK_ImgsToPDF {
         /// 具体路径是否支持，在 OnDragDataReceived 里判断并给出文字提示。
         /// </summary>
         private void OnDragMotion(object o, DragMotionArgs args) {
+            if (_isProcessing) {
+                Gdk.Drag.Status(args.Context, (DragAction)0, args.Time);
+                SetDropHighlight(false);
+                args.RetVal = true;
+                return;
+            }
+
             // target_list 传 null 表示使用控件自己注册的目标列表
             Gdk.Atom target = Gtk.Drag.DestFindTarget(_dropTarget, args.Context, null);
             bool acceptable = target != null && !string.IsNullOrEmpty(target.Name);
@@ -575,6 +648,10 @@ namespace GTK_ImgsToPDF {
         // 处理拖拽接收事件
         private void OnDragDataReceived(object o, DragDataReceivedArgs args) {
             SetDropHighlight(false);
+            if (_isProcessing) {
+                args.RetVal = true;
+                return;
+            }
 
             // 整个处理过程包在 try/catch 里：拖放源提供的内容不受本程序控制，
             // 任何意外异常都不应逃逸到 GTK 主循环（那会表现为界面卡死或崩溃）
@@ -641,6 +718,10 @@ namespace GTK_ImgsToPDF {
             MsgBox.Show(this, message, MessageType.Warning, Strings.Msg_ErrorTitle);
         }
         private void SelectFolder() {
+            if (_isProcessing) {
+                return;
+            }
+
             string selectedPath = null!;
 
             // 1. 创建文件夹选择对话框
@@ -673,6 +754,10 @@ namespace GTK_ImgsToPDF {
         }
 
         private void SelectArchive() {
+            if (_isProcessing) {
+                return;
+            }
+
             string selectedPath = null!;
 
             using (FileChooserDialog dialog = new(
@@ -733,7 +818,8 @@ namespace GTK_ImgsToPDF {
                 // 关键：只要目录存在就允许开始，不要求本层必须有图片。
                 // 递归模式的主要用法正是"选中只有子目录的父目录"，
                 // 由 Core 进程逐个处理子目录（对应原版 ImgsToPDF.cs 对任何存在的目录都启用按钮）。
-                _startBtn.Sensitive = true;
+                _hasValidSelection = true;
+                _startBtn.Sensitive = !_isProcessing;
 
                 var candidates = Directory.EnumerateFiles(folderPath)
                     .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file)))
@@ -820,7 +906,8 @@ namespace GTK_ImgsToPDF {
         // 处理压缩包：更新 UI 状态
         private void ProcessArchive(string archivePath) {
             SetPathLabel(archivePath);
-            _startBtn.Sensitive = true;
+            _hasValidSelection = true;
+            _startBtn.Sensitive = !_isProcessing;
 
             // 作废可能仍在后台运行的目录预览，避免它稍后覆盖压缩包图标
             _previewRequestId++;
@@ -846,6 +933,7 @@ namespace GTK_ImgsToPDF {
         private void ResetToInitialState() {
             // 作废可能仍在后台运行的预览加载
             _previewRequestId++;
+            _hasValidSelection = false;
 
             // 释放旧的预览图再重置
             var oldResetIcon = _mainImage.Pixbuf;
@@ -855,6 +943,11 @@ namespace GTK_ImgsToPDF {
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = Strings.Hint_Initial;
             _smallFolderIcon.Hide();
+
+            if (_progressBar != null) {
+                _progressBar.Hide();
+                _progressBar.Fraction = 0.0;
+            }
 
             // 重置 startBtn 状态（安全检查）
             _startBtn.Sensitive = false;
@@ -998,6 +1091,44 @@ namespace GTK_ImgsToPDF {
             Environment.Exit(0);
         }
 
+        private const int SW_RESTORE = 9;
+
+        [DllImport("user32.dll")]
+        private static extern bool ShowWindowAsync(IntPtr hWnd, int cmdShow);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern bool IsIconic(IntPtr hWnd);
+
+        private static void ActivateExistingInstance() {
+            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
+                return;
+            }
+            try {
+                using var current = Process.GetCurrentProcess();
+                foreach (var process in Process.GetProcessesByName(current.ProcessName)) {
+                    using (process) {
+                        if (process.Id == current.Id) {
+                            continue;
+                        }
+                        IntPtr hWnd = process.MainWindowHandle;
+                        if (hWnd != IntPtr.Zero) {
+                            if (IsIconic(hWnd)) {
+                                ShowWindowAsync(hWnd, SW_RESTORE);
+                            }
+                            SetForegroundWindow(hWnd);
+                            break;
+                        }
+                    }
+                }
+            }
+            catch {
+                // 忽略窗口激活异常
+            }
+        }
+
         [STAThread]
         public static void Main(string[] args) {
             // 命令行开关按 Windows 惯例不区分大小写
@@ -1006,8 +1137,9 @@ namespace GTK_ImgsToPDF {
             using Mutex mutex = new(true, @"GTK_ImgsToPDF", out bool isFirstInstance);
 
             if (!isFirstInstance) {
-                // 普通重复启动：直接退出
+                // 普通重复启动：唤醒已有窗口并退出
                 if (!restarted) {
+                    ActivateExistingInstance();
                     return;
                 }
 

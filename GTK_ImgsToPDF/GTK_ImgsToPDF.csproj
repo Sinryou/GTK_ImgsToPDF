@@ -46,6 +46,7 @@
          与构建目标共用同一份路径计算，避免两处各写一遍后走样。 -->
     <_CoreBuildDir>$([System.IO.Path]::Combine($(MSBuildThisFileDirectory), $(BaseIntermediateOutputPath), 'CoreBuild', '$(Configuration)-$(Platform)-$(_CoreRuntimeIdentifier)'))\</_CoreBuildDir>
     <_CorePublishStagingDir>$([System.IO.Path]::Combine($(MSBuildThisFileDirectory), $(BaseIntermediateOutputPath), 'CorePublish', '$(Configuration)-$(Platform)-$(_CoreRuntimeIdentifier)'))</_CorePublishStagingDir>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <!-- dotnet build / F5：构建 Core（框架依赖 + 当前 RID，原生库平铺且只含本平台，
@@ -54,16 +55,12 @@
   <Target Name="CopyCoreBuildOutput" AfterTargets="Build">
     <Message Text="正在构建并镜像 Core 组件..." Importance="high" />
     <RemoveDir Directories="$(_CoreBuildDir)" />
-    <MSBuild Projects="$(CoreProjectPath)"
-             Targets="Restore;Build"
-             Properties="SelfContained=false;RuntimeIdentifier=$(_CoreRuntimeIdentifier);OutputPath=$(_CoreBuildDir);AppendRuntimeIdentifierToOutputPath=false" />
+    <MSBuild Projects="$(CoreProjectPath)" Targets="Restore;Build" Properties="SelfContained=false;RuntimeIdentifier=$(_CoreRuntimeIdentifier);OutputPath=$(_CoreBuildDir);AppendRuntimeIdentifierToOutputPath=false" />
     <ItemGroup>
       <_CoreBuildFiles Include="$(_CoreBuildDir)**\*.*" Exclude="$(_CoreBuildDir)**\*.pdb" />
     </ItemGroup>
     <RemoveDir Directories="$(TargetDir)Core" />
-    <Copy SourceFiles="@(_CoreBuildFiles)"
-          DestinationFiles="@(_CoreBuildFiles->'$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)')"
-          OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(_CoreBuildFiles)" DestinationFiles="@(_CoreBuildFiles->'$(TargetDir)Core\%(RecursiveDir)%(Filename)%(Extension)')" OverwriteReadOnlyFiles="true" />
   </Target>
 
   <!-- dotnet publish：把 Core 发布成自包含单文件，镜像进发布目录。
@@ -73,9 +70,7 @@
   <Target Name="PublishCoreAndCopy" AfterTargets="Publish">
     <Message Text="正在发布 Core（自包含单文件，RID: $(_CoreRuntimeIdentifier)）..." Importance="high" />
     <RemoveDir Directories="$(_CorePublishStagingDir)" />
-    <MSBuild Projects="$(CoreProjectPath)"
-             Targets="Restore;Publish"
-             Properties="RuntimeIdentifier=$(_CoreRuntimeIdentifier);SelfContained=true;PublishDir=$(_CorePublishStagingDir)" />
+    <MSBuild Projects="$(CoreProjectPath)" Targets="Restore;Publish" Properties="RuntimeIdentifier=$(_CoreRuntimeIdentifier);SelfContained=true;PublishDir=$(_CorePublishStagingDir)" />
     <PropertyGroup>
       <_CorePublishDir>$([System.IO.Path]::Combine($(PublishDir), 'Core'))</_CorePublishDir>
     </PropertyGroup>
@@ -83,13 +78,9 @@
     <ItemGroup>
       <_CorePublishFiles Include="$(_CorePublishStagingDir)\**\*.*" Exclude="$(_CorePublishStagingDir)\**\*.pdb" />
     </ItemGroup>
-    <Copy SourceFiles="@(_CorePublishFiles)"
-          DestinationFiles="@(_CorePublishFiles->'$(_CorePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')"
-          OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="@(_CorePublishFiles)" DestinationFiles="@(_CorePublishFiles->'$(_CorePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')" OverwriteReadOnlyFiles="true" />
     <!-- Copy 任务可能不保留可执行位，Linux 下的 Core apphost 需要手动补上 -->
-    <Exec Condition="$([MSBuild]::IsOSPlatform('Linux'))"
-          Command="chmod +x '$(_CorePublishDir)/ImgsToPDFCore'"
-          IgnoreExitCode="true" />
+    <Exec Condition="$([MSBuild]::IsOSPlatform('Linux'))" Command="chmod +x '$(_CorePublishDir)/ImgsToPDFCore'" IgnoreExitCode="true" />
   </Target>
 
   <!-- 发布项里过滤掉全部 pdb：都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），

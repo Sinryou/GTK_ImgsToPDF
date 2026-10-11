@@ -12,6 +12,7 @@ internal struct CSGlobal {
     public static readonly List<Type> lua_call_cs_list = [
         typeof(iText.Kernel.Geom.PageSize),
         typeof(iText.Kernel.Geom.Rectangle),
+        typeof(CommonUtils),
         typeof(PDFWrapper),
     ];
     #endregion

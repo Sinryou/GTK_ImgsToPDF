@@ -243,4 +243,7 @@
   <data name="Msg_NotAnArchive" xml:space="preserve">
     <value>所选文件不是支持的压缩包格式</value>
   </data>
+  <data name="Msg_WarnGenerating" xml:space="preserve">
+    <value>PDF 正在生成中，确定要退出程序吗？</value>
+  </data>
 </root>

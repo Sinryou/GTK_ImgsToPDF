@@ -1,4 +1,4 @@
-using Gdk;
+﻿using Gdk;
 using Gtk;
 using GTK_ImgsToPDF.Config;
 using GTK_ImgsToPDF.Localization;

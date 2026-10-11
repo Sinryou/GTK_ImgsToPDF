@@ -1241,9 +1241,11 @@ namespace GTK_ImgsToPDF {
             }
 
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
-                [DllImport("kernel32.dll", SetLastError = true)]
+                [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
                 static extern bool SetDllDirectory(string lpPathName);
-                SetDllDirectory(System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime"));
+                string runtimeBin = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime", "bin");
+                string runtimeRoot = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime");
+                SetDllDirectory(Directory.Exists(runtimeBin) ? runtimeBin : runtimeRoot);
             }
 
             Application.Init();

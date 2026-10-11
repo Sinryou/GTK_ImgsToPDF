@@ -75,6 +75,8 @@ elseif ffi.os == "Windows" then
         local baseDir = pathUtil.currentDir() .. [[\..]]
         if pathUtil.fileExist(baseDir .. [[\libgtk-3-0.dll]]) then
             gtkPath = baseDir
+        elseif pathUtil.dirExist(baseDir .. [[\runtime\bin]]) then
+            gtkPath = baseDir .. [[\runtime\bin]]
         else
             gtkPath = baseDir .. [[\runtime]]
         end

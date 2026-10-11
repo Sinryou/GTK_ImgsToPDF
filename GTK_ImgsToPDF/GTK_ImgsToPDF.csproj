@@ -89,10 +89,18 @@
   <!-- ══ GTK3 原生运行时（仅 Windows 发布） ══
        GtkSharp 的 NuGet 包只含托管程序集（lib\net6.0\GtkSharp.dll），不带任何原生
        DLL，deps.json 里也没有 native 条目；Windows 上运行必须有 GTK3 运行时。
-       两个加载点都按「程序目录下的 runtime\」查找，因此这里只镜像这一个目录：
-         · GUI   —— Program.cs 的 SetDllDirectory(<BaseDirectory>\runtime)
-         · Core  —— Core\Modules\VisualGTK.lua 的第三条回退路径 <app>\runtime
-                     （Core 的工作目录是 <app>\Core，故 <cwd>\..\runtime）
+       两个加载点都按「程序目录下的 runtime\bin（回退 runtime\）」查找，因此这里只镜像这一个目录：
+         · GUI   —— Program.cs 的 SetDllDirectory(<BaseDirectory>\runtime\bin)
+         · Core  —— Core\Modules\VisualGTK.lua 的第三条回退路径 <app>\runtime\bin
+                     （Core 的工作目录是 <app>\Core，故 <cwd>\..\runtime\bin）
+
+       注意：顶层 *.dll 必须放在 runtime\bin\ 下，不能直接平铺在 runtime\ 根部。
+       原因：GLib 的 g_win32_get_package_installation_directory_of_module 会从 DLL 所在目录
+       用 strrchr 循环向上逐级寻找名为 "bin" 或 "lib" 的父目录，并将其上一级作为 GTK 根目录
+       （用于定位 <toplevel>\lib\gdk-pixbuf-2.0\2.10.0\loaders.cache、share\icons 等）。
+       若 DLL 直接平铺在 runtime\ 下，且外层路径恰好含 "bin"（如 bin\Release\...\publish\runtime），
+       GLib 会一路回溯到外层 bin\ 的父目录，导致找不到 loaders.cache 在启动时崩溃。
+       放入 runtime\bin\ 后，GLib 在第一层即命中 "bin" 并停止回溯，精准定位到 runtime\。
 
        源目录默认取 gvsbuild 版 GTK3 的安装位置，可用 -p:GtkRuntimeSource=<路径>
        覆盖（CI 上从 gvsbuild release 解压到工作目录后指定即可）。
@@ -112,7 +120,16 @@
     <Warning Condition="!Exists('$(GtkRuntimeSource)')" Text="未找到 GTK3 运行时 '$(GtkRuntimeSource)'，发布产物将不含 runtime\，在未安装 GTK3 的 Windows 机器上无法启动。请用 -p:GtkRuntimeSource=&lt;路径&gt; 指定（例如从 gvsbuild release 解压出的目录）。" />
 
     <ItemGroup Condition="Exists('$(GtkRuntimeSource)')">
-      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*" Exclude="$(GtkRuntimeSource)\*.exe;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk.zip;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk3-runtime\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\ssl\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
+      <_GtkRuntimeRootDlls Include="$(GtkRuntimeSource)\*.dll" />
+      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*"
+                        Exclude="$(GtkRuntimeSource)\*.dll;
+                                 $(GtkRuntimeSource)\**\*.exe;
+                                 $(GtkRuntimeSource)\gtk.zip;
+                                 $(GtkRuntimeSource)\gtk3-runtime\**;
+                                 $(GtkRuntimeSource)\ssl\**;
+                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;
+                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;
+                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
     </ItemGroup>
 
     <PropertyGroup>
@@ -120,8 +137,9 @@
     </PropertyGroup>
 
     <RemoveDir Directories="$(_GtkRuntimePublishDir)" Condition="Exists('$(GtkRuntimeSource)')" />
+    <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeRootDlls)" DestinationFolder="$(_GtkRuntimePublishDir)\bin" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeFiles)" DestinationFiles="@(_GtkRuntimeFiles->'$(_GtkRuntimePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-    <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high" Text="已镜像 GTK3 运行时（@(_GtkRuntimeFiles-&gt;Count()) 个文件）到 $(_GtkRuntimePublishDir)" />
+    <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high" Text="已镜像 GTK3 运行时到 $(_GtkRuntimePublishDir)" />
   </Target>
 
   <!-- 发布项里过滤掉全部 pdb：都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），

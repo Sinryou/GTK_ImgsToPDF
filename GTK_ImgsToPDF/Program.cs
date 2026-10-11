@@ -1,9 +1,10 @@
-﻿using Gdk;
+using Gdk;
 using Gtk;
 using GTK_ImgsToPDF.Config;
 using GTK_ImgsToPDF.Localization;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using SkiaSharp;
@@ -1074,11 +1075,24 @@ namespace GTK_ImgsToPDF {
         /// </summary>
         private const int RestartWaitMilliseconds = 5000;
 
+        /// <summary>
+        /// 单实例唤醒命名管道监听器的取消令牌源；在语言切换重启前主动取消，
+        /// 确保旧实例立即释放管道（Linux 下为 /tmp/CoreFxPipe_* 套接字）。
+        /// </summary>
+        private static CancellationTokenSource? _pipeServerCts;
+
+        private static string GetActivationPipeName() {
+            // 带上当前用户名，避免 Linux 多用户环境下 /tmp/CoreFxPipe_* 权限冲突
+            return $"GTK_ImgsToPDF_Activate_{Environment.UserName}";
+        }
+
         private static void RestartApplication() {
             string? fileName = Environment.ProcessPath;
             if (string.IsNullOrEmpty(fileName)) {
                 return;
             }
+
+            _pipeServerCts?.Cancel();
 
             // 不用 using：Process.Start 返回后新进程仍在运行，立即 Dispose 语义不正确
             Process.Start(new ProcessStartInfo {
@@ -1091,21 +1105,19 @@ namespace GTK_ImgsToPDF {
             Environment.Exit(0);
         }
 
-        private const int SW_RESTORE = 9;
+        [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+        private static void ActivateExistingInstanceWindows() {
+            const int SW_RESTORE = 9;
 
-        [DllImport("user32.dll")]
-        private static extern bool ShowWindowAsync(IntPtr hWnd, int cmdShow);
+            [DllImport("user32.dll")]
+            static extern bool ShowWindowAsync(IntPtr hWnd, int cmdShow);
 
-        [DllImport("user32.dll")]
-        private static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            static extern bool SetForegroundWindow(IntPtr hWnd);
 
-        [DllImport("user32.dll")]
-        private static extern bool IsIconic(IntPtr hWnd);
+            [DllImport("user32.dll")]
+            static extern bool IsIconic(IntPtr hWnd);
 
-        private static void ActivateExistingInstance() {
-            if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
-                return;
-            }
             try {
                 using var current = Process.GetCurrentProcess();
                 foreach (var process in Process.GetProcessesByName(current.ProcessName)) {
@@ -1127,6 +1139,75 @@ namespace GTK_ImgsToPDF {
             catch {
                 // 忽略窗口激活异常
             }
+        }
+
+        /// <summary>
+        /// 唤醒已运行的单实例窗口：
+        /// - Windows：新启动的进程持有外壳赋予的前台焦点权限，先用 Win32 API 直接恢复并前置旧窗口；
+        /// - Linux（X11 / Wayland）及 Windows 兜底：通过跨平台命名管道（Linux 下基于 Unix Domain Socket）
+        ///   向主实例发送唤醒信号，由主实例在 GTK 主线程调用 <see cref="Window.Deiconify"/> 与 <see cref="Window.Present"/>。
+        /// </summary>
+        private static void ActivateExistingInstance() {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
+                ActivateExistingInstanceWindows();
+            }
+
+            try {
+                using var client = new NamedPipeClientStream(".", GetActivationPipeName(), PipeDirection.Out);
+                client.Connect(timeout: 500);
+                client.WriteByte(1);
+                client.Flush();
+            }
+            catch {
+                // 忽略连接超时或管道异常
+            }
+        }
+
+        /// <summary>
+        /// 在主实例后台监听单实例唤醒管道，收到新实例连接后切回 GTK 主线程恢复并前置窗口。
+        /// </summary>
+        private static CancellationTokenSource StartActivationPipeServer(ImgsToPDF window) {
+            var cts = new CancellationTokenSource();
+            CancellationToken token = cts.Token;
+            string pipeName = GetActivationPipeName();
+
+            _ = Task.Run(async () => {
+                while (!token.IsCancellationRequested) {
+                    try {
+                        using var server = new NamedPipeServerStream(
+                            pipeName,
+                            PipeDirection.In,
+                            1,
+                            PipeTransmissionMode.Byte,
+                            PipeOptions.Asynchronous);
+
+                        await server.WaitForConnectionAsync(token);
+
+                        Application.Invoke((s, e) => {
+                            try {
+                                window.Deiconify();
+                                window.Present();
+                            }
+                            catch {
+                                // 忽略窗口已关闭时的异常
+                            }
+                        });
+                    }
+                    catch (OperationCanceledException) {
+                        break;
+                    }
+                    catch {
+                        try {
+                            await Task.Delay(200, token);
+                        }
+                        catch (OperationCanceledException) {
+                            break;
+                        }
+                    }
+                }
+            }, token);
+
+            return cts;
         }
 
         [STAThread]
@@ -1166,8 +1247,11 @@ namespace GTK_ImgsToPDF {
             }
 
             Application.Init();
-            _ = new ImgsToPDF();
+            var mainWindow = new ImgsToPDF();
+            using var pipeServerCts = StartActivationPipeServer(mainWindow);
+            _pipeServerCts = pipeServerCts;
             Application.Run();
+            _pipeServerCts?.Cancel();
         }
     }
 }

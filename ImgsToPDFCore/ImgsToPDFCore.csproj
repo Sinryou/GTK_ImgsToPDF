@@ -21,6 +21,9 @@
     <Authors>Sinryou</Authors>
     <Description>ImgsToPDF 核心命令行处理模块</Description>
     <PackageProjectUrl>https://github.com/Sinryou/GTK_ImgsToPDF</PackageProjectUrl>
+    <!-- Windows 清单：声明 longPathAware（详见 app.manifest 内的说明）。
+         在 Linux 上构建时该属性被忽略；单文件发布同样会把清单写进 apphost。 -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <!-- 本项目的构建/发布产物由 GUI（GTK_ImgsToPDF.csproj）用 MSBuild 任务触发并统一

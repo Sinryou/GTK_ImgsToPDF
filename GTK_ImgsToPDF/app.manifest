@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+
+<!-- GTK_ImgsToPDF（GUI）的 Windows 应用程序清单。
+
+     只声明 longPathAware，与 Core 的清单保持一致：
+     GUI 自身也要打开 config.lua、枚举递归子目录、把路径作为参数交给 Core，
+     同样会被 MAX_PATH 限制挡住。.NET 10 的 SDK 默认清单只含 asInvoker，
+     不含 longPathAware，因此必须显式声明。
+
+     刻意不声明 dpiAwareness：GTK3 在 Windows 上自带 DPI 处理，界面不会发虚，
+     加上 PerMonitorV2 反而可能与 GTK 自己的缩放逻辑打架。
+
+     requestedExecutionLevel 与 SDK 默认清单保持一致（asInvoker，不提权）。 -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="GTK_ImgsToPDF.app" />
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

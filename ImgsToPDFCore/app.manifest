@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+
+<!-- ImgsToPDFCore 的 Windows 应用程序清单。
+
+     只声明 longPathAware：Core 承担本次任务的全部文件 I/O（枚举目录、读图、
+     写 PDF，其中输出还多一层 "<目标>.tmp"），深度嵌套的图片目录很容易超过
+     MAX_PATH(260)。Windows 上即使注册表已开启 LongPathsEnabled，进程清单若
+     未声明 longPathAware，Win32 API 依旧按 260 截断并抛 PathTooLongException。
+
+     GUI 项目（GTK_ImgsToPDF）另有自己的清单，两者不能共用：
+     Core 与 GUI 是各自独立的可执行文件。
+
+     requestedExecutionLevel 与 SDK 默认清单保持一致（asInvoker，不提权）。 -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <assemblyIdentity version="1.0.0.0" name="ImgsToPDFCore.app" />
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+    </windowsSettings>
+  </application>
+</assembly>

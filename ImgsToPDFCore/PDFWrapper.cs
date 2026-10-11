@@ -659,7 +659,7 @@ namespace ImgsToPDFCore {
             if (trimmed.Length == 0) {
                 return System.IO.Path.DirectorySeparatorChar.ToString();
             }
-            return trimmed.EndsWith(":", StringComparison.Ordinal) ? trimmed + System.IO.Path.DirectorySeparatorChar : trimmed;
+            return trimmed.EndsWith(':') ? trimmed + System.IO.Path.DirectorySeparatorChar : trimmed;
         }
 
         /// <summary>

@@ -33,6 +33,11 @@ namespace GTK_ImgsToPDF {
         private bool _isProcessing;
         private bool _hasValidSelection;
 
+        /// <summary>
+        /// 窗口是否已确认关闭，用于阻止关闭瞬间排队中的任务继续拉起新子进程
+        /// </summary>
+        private volatile bool _isClosing;
+
         // 定义支持的文件扩展名。
         // 用 OrdinalIgnoreCase 比较而不是 ToLower()：扩展名与当前区域设置无关
         // （tr-TR 下 "I".ToLower() 是无点 "ı"，".TIF" 会被误判为不支持），
@@ -69,6 +74,7 @@ namespace GTK_ImgsToPDF {
                     e.RetVal = true;
                     return;
                 }
+                _isClosing = true;
                 Application.Quit();
             };
 
@@ -138,6 +144,7 @@ namespace GTK_ImgsToPDF {
             MenuItem quitItem = new(Strings.Menu_Exit) { UseUnderline = true };
             quitItem.Activated += (s, e) => {
                 if (ConfirmExit()) {
+                    _isClosing = true;
                     Application.Quit();
                 }
             };
@@ -401,6 +408,7 @@ namespace GTK_ImgsToPDF {
                 try {
                     var (failures, warnings) = await Task.Run(() =>
                         GeneratePdfs(directoryPath, recursive, fastMode, merge, layoutIndex));
+                    if (_isClosing) return;
 
                     _progressBar.Fraction = 1.0;
 
@@ -430,14 +438,18 @@ namespace GTK_ImgsToPDF {
                     }
                 }
                 catch (Exception ex) {
+                    if (_isClosing) return;
+
                     _progressBar.Fraction = 1.0;
                     SetLabelColor(_hintLabel, 200, 0, 0);
                     _hintLabel.Text = string.Format(Strings.Hint_Failed, ex.Message);
                     MsgBox.Show(this, ex.Message, MessageType.Error, Strings.Msg_ErrorTitle);
                 }
                 finally {
-                    // 无论成功还是出错都恢复控件可用状态，避免界面卡死
-                    SetUiState(false);
+                    if (!_isClosing) {
+                        // 无论成功还是出错都恢复控件可用状态，避免界面卡死
+                        SetUiState(false);
+                    }
                 }
             };
             actionBox.PackStart(_startBtn, false, true, 20);
@@ -489,7 +501,7 @@ namespace GTK_ImgsToPDF {
         /// failures = Core 进程退出码非 0（真的没生成出来）；
         /// warnings = 退出码为 0 但 stderr 有内容（PDF 已生成，个别图片被跳过）。
         /// </returns>
-        private static async Task<(List<string> failures, List<string> warnings)> GeneratePdfs(
+        private async Task<(List<string> failures, List<string> warnings)> GeneratePdfs(
                 string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
@@ -517,6 +529,7 @@ namespace GTK_ImgsToPDF {
                 var tasks = dirs.Select(async dirPath => {
                     await semaphore.WaitAsync();
                     try {
+                        if (_isClosing) return;
                         var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layoutIndex));
                         CollectProcessResult(dirPath, stderr, exitCode, failureQueue, warningQueue);
                     }
@@ -526,12 +539,12 @@ namespace GTK_ImgsToPDF {
                 }).ToList();
                 await Task.WhenAll(tasks);
 
-                if (merge) {
+                if (merge && !_isClosing) {
                     var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layoutIndex: 0, mergePdfs: true));
                     CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
                 }
             }
-            else {
+            else if (!_isClosing) {
                 var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layoutIndex));
                 CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
             }

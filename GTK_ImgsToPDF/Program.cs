@@ -56,6 +56,29 @@ namespace GTK_ImgsToPDF {
         /// </summary>
         private int _previewRequestId;
 
+        static ImgsToPDF() {
+            NativeLibrary.SetDllImportResolver(typeof(SKImage).Assembly, ResolveSkiaSharpNativeLibrary);
+        }
+
+        /// <summary>
+        /// 将 GUI 的 SkiaSharp 原生库解析重定向到 Core 子目录，直接复用 Core\libSkiaSharp，
+        /// 避免 GUI 根目录与 Core\ 下各存一份完全相同的原生库。
+        /// </summary>
+        private static IntPtr ResolveSkiaSharpNativeLibrary(string libraryName, Assembly assembly, DllImportSearchPath? searchPath) {
+            if (libraryName == "libSkiaSharp") {
+                string fileName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
+                    ? "libSkiaSharp.dll"
+                    : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
+                        ? "libSkiaSharp.dylib"
+                        : "libSkiaSharp.so";
+                string candidatePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", fileName);
+                if (File.Exists(candidatePath) && NativeLibrary.TryLoad(candidatePath, out IntPtr handle)) {
+                    return handle;
+                }
+            }
+            return IntPtr.Zero;
+        }
+
         public ImgsToPDF() : base("ImgsToPDF") {
             // 设置中的语言值可能为空或无效（config.json 被手改/损坏），
             // 构造 CultureInfo 失败时回退到系统当前语言，避免应用无法启动

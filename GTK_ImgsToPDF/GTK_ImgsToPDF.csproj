@@ -186,11 +186,14 @@
     <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high" Text="已镜像 GTK3 运行时到 $(_GtkRuntimePublishDir)" />
   </Target>
 
-  <!-- 发布项里过滤掉全部 pdb：都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），
-       运行时用不到。挂在 ComputeFilesToPublish 之后，pdb 根本不会进发布目录。 -->
+  <!-- 发布项里过滤掉全部 pdb 与 GUI 自身的 libSkiaSharp 原生库：
+       · pdb 都是原生符号（SkiaSharp 的 libSkiaSharp.pdb 有 90+MB），运行时用不到；
+       · GUI 已通过 Program.cs 的 NativeLibrary.SetDllImportResolver 直接复用 Core\libSkiaSharp，
+         无需在根目录重复放一份 12MB 的原生库。 -->
   <Target Name="RemovePublishPdbs" AfterTargets="ComputeFilesToPublish">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+                             Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' or '%(ResolvedFileToPublish.Filename)' == 'libSkiaSharp'" />
     </ItemGroup>
   </Target>
 
@@ -214,8 +217,8 @@
 
   <ItemGroup>
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
+    <!-- GUI 只使用 SkiaSharp 托管层，原生库（libSkiaSharp.dll / libSkiaSharp.so）直接复用 Core\ 下的那一份 -->
+    <PackageReference Include="SkiaSharp" Version="4.153.1" ExcludeAssets="native" />
   </ItemGroup>
 
   <ItemGroup>

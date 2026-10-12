@@ -12,8 +12,10 @@
     <PublishProtocol>FileSystem</PublishProtocol>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>True</PublishSingleFile>
-    <!-- 刻意不开 PublishTrimmed：XLua 通过反射桥接 C#/Lua（CSGlobal.lua_call_cs_list、
-         IConfig 的 CSharpCallLua），裁剪会剥掉仅被反射使用的类型，Lua 调 C# 处会运行时崩溃。 -->
+    <!-- 使用 partial 裁剪：仅裁剪显式声明了 IsTrimmable 的程序集（.NET BCL、SkiaSharp、SharpCompress 等），
+         而 ImgsToPDFCore、XLua.Mini、itext、CommandLine 会完整保留，不会破坏 XLua 反射桥接。 -->
+    <PublishTrimmed>True</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <FileVersion>1.1.0.0</FileVersion>

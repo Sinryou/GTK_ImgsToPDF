@@ -31,8 +31,9 @@
        它的产物统一由本文件管理：
        · dotnet build：以框架依赖方式构建 Core（开发机装有 .NET 运行时即可运行），
          镜像到输出目录 Core\；
-       · dotnet publish：以与 GUI 相同的 RID 把 Core 发布成自包含单文件（Core 用 XLua
-         反射互操作，发布时不做裁剪），镜像到发布目录 Core\。
+       · dotnet publish：以与 GUI 相同的 RID 把 Core 发布成自包含单文件（partial 裁剪，
+         仅裁剪标记了 IsTrimmable 的框架与库程序集，保留 XLua 反射互操作所需的全部类型），
+         镜像到发布目录 Core\。
        用 MSBuild 任务而非 ProjectReference 触发 Core 构建：ProjectReference 即使
        ReferenceOutputAssembly=false 也会把 Core 的内容文件/apphost 流入 GUI 输出目录根。
        两处镜像都先清空目标再全量复制并排除 pdb，保证不残留旧构建文件；

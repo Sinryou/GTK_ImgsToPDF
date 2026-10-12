@@ -106,12 +106,19 @@
        源目录默认取 gvsbuild 版 GTK3 的安装位置，可用 -p:GtkRuntimeSource=<路径>
        覆盖（CI 上从 gvsbuild release 解压到工作目录后指定即可）。
 
-       排除项 = v1.0.5 手工裁剪并验证可用的集合，四类：
+       排除项：
          · 安装器/命令行工具（*.exe，应用不调用任何一个）
          · 安装包本体与残留（gtk.zip、gtk3-runtime\、ssl\）
+         · C++ 绑定与可选扩展库（gtkmm/glibmm/atkmm/cairomm/pangomm/libsigc++/libxml++、
+           gtksourceview-3/4、girepository、libpeas、libsoup、gnutls/nettle/hogweed/p11-kit/
+           gmp/tasn1/idn2/unistring/psl/libproxy、sqlite3、libxslt/libexslt、libcroco、
+           json-glib、gailutil、cairo-script-interpreter、libssp、未在 loaders.cache 注册的 jasper）
+         · 动态语言类型库与网络模块（lib\girepository-1.0\、lib\gio\、lib\libpeas-1.0\）
+         · GtkSourceView 语法定义与未编译的 GSettings XML 源码（运行时只读 gschemas.compiled）
+         · hicolor 下的示例应用图标（gedit/glade/gitg/gtk3-demo，仅保留 index.theme 与 cache）
          · X11 光标主题（share\icons\Adwaita\cursors，Windows 不读）
          · 256/512 像素图标（应用只用到 16~96 与 scalable）
-       裁剪后约 66 MB / 8281 个文件。 -->
+       裁剪后约 40.6 MB / 7764 个文件。 -->
   <PropertyGroup>
     <GtkRuntimeVersion Condition="'$(GtkRuntimeVersion)' == ''">3.24.24</GtkRuntimeVersion>
     <GtkRuntimeSource Condition="'$(GtkRuntimeSource)' == '' and '$(OS)' == 'Windows_NT'">$(LOCALAPPDATA)\Gtk\$(GtkRuntimeVersion)</GtkRuntimeSource>
@@ -121,13 +128,49 @@
     <Warning Condition="!Exists('$(GtkRuntimeSource)')" Text="未找到 GTK3 运行时 '$(GtkRuntimeSource)'，发布产物将不含 runtime\，在未安装 GTK3 的 Windows 机器上无法启动。请用 -p:GtkRuntimeSource=&lt;路径&gt; 指定（例如从 gvsbuild release 解压出的目录）。" />
 
     <ItemGroup Condition="Exists('$(GtkRuntimeSource)')">
-      <_GtkRuntimeRootDlls Include="$(GtkRuntimeSource)\*.dll" />
+      <_GtkRuntimeRootDlls Include="$(GtkRuntimeSource)\*.dll"
+                           Exclude="$(GtkRuntimeSource)\lib*mm-*.dll;
+                                    $(GtkRuntimeSource)\libglibmm_*.dll;
+                                    $(GtkRuntimeSource)\libsigc-*.dll;
+                                    $(GtkRuntimeSource)\libxml++-*.dll;
+                                    $(GtkRuntimeSource)\libgtksourceview-*.dll;
+                                    $(GtkRuntimeSource)\libgirepository-*.dll;
+                                    $(GtkRuntimeSource)\libpeas*.dll;
+                                    $(GtkRuntimeSource)\libsoup*.dll;
+                                    $(GtkRuntimeSource)\libgnutls-*.dll;
+                                    $(GtkRuntimeSource)\libgmp-*.dll;
+                                    $(GtkRuntimeSource)\libhogweed-*.dll;
+                                    $(GtkRuntimeSource)\libnettle-*.dll;
+                                    $(GtkRuntimeSource)\libp11-kit-*.dll;
+                                    $(GtkRuntimeSource)\libtasn1-*.dll;
+                                    $(GtkRuntimeSource)\libidn2-*.dll;
+                                    $(GtkRuntimeSource)\libunistring-*.dll;
+                                    $(GtkRuntimeSource)\libpsl-*.dll;
+                                    $(GtkRuntimeSource)\libproxy-*.dll;
+                                    $(GtkRuntimeSource)\libsqlite3-*.dll;
+                                    $(GtkRuntimeSource)\libxslt-*.dll;
+                                    $(GtkRuntimeSource)\libexslt-*.dll;
+                                    $(GtkRuntimeSource)\libcroco-*.dll;
+                                    $(GtkRuntimeSource)\libjson-glib-*.dll;
+                                    $(GtkRuntimeSource)\libgailutil-*.dll;
+                                    $(GtkRuntimeSource)\libcairo-script-interpreter-*.dll;
+                                    $(GtkRuntimeSource)\libssp-*.dll;
+                                    $(GtkRuntimeSource)\libjasper-*.dll" />
       <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*"
                         Exclude="$(GtkRuntimeSource)\*.dll;
                                  $(GtkRuntimeSource)\**\*.exe;
                                  $(GtkRuntimeSource)\gtk.zip;
                                  $(GtkRuntimeSource)\gtk3-runtime\**;
                                  $(GtkRuntimeSource)\ssl\**;
+                                 $(GtkRuntimeSource)\lib\girepository-1.0\**;
+                                 $(GtkRuntimeSource)\lib\gio\**;
+                                 $(GtkRuntimeSource)\lib\libpeas-1.0\**;
+                                 $(GtkRuntimeSource)\lib\gdk-pixbuf-2.0\**\libpixbufloader-jasper.dll;
+                                 $(GtkRuntimeSource)\share\gtksourceview-3.0\**;
+                                 $(GtkRuntimeSource)\share\gtksourceview-4\**;
+                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.xml;
+                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.dtd;
+                                 $(GtkRuntimeSource)\share\icons\hicolor\*\**;
                                  $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;
                                  $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;
                                  $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />

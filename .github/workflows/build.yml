@@ -31,34 +31,48 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/gtk3-runtime
-          key: gtk3-runtime-3.24.24
+          key: gtk3-runtime-3.24.24-v2
 
       - name: Download and Setup GTK3 Runtime
         if: steps.cache-gtk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
           $installer = "$env:RUNNER_TEMP\gtk3-installer.exe"
-          $installDir = "${{ runner.temp }}/gtk3-runtime"
+          $installDir = "${{ runner.temp }}\gtk3-runtime"
           $url = "https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases/download/2021-01-30/gtk3-runtime-3.24.24-2021-01-30-ts-win64.exe"
           
           Write-Host "Downloading GTK3 runtime installer..."
           Invoke-WebRequest -Uri $url -OutFile $installer
           
-          Write-Host "Installing GTK3 runtime silently..."
-          Start-Process -FilePath $installer -ArgumentList "/S", "/D=$installDir" -Wait
-          Start-Sleep -Seconds 3
+          Write-Host "Extracting GTK3 runtime via 7z..."
+          if (Test-Path $installDir) { Remove-Item -Recurse -Force $installDir }
+          & 7z x $installer -o"$installDir" -y | Out-Null
           
-          # GTK_ImgsToPDF.csproj 期望根目录下有 *.dll
-          if (Test-Path "$installDir\bin") {
-              Get-ChildItem -Path "$installDir\bin\*.dll" | Move-Item -Destination "$installDir\" -Force
-              Remove-Item -Path "$installDir\bin" -Recurse -Force -ErrorAction SilentlyContinue
+          # 7z 解包 NSIS 安装包时，根目录的 DLL/EXE 会位于 $_63_ 目录下。
+          # 将其移动到根目录下，以符合 GTK_ImgsToPDF.csproj 对 GtkRuntimeSource 根目录 *.dll 的结构期望。
+          if (Test-Path "$installDir\`$_63_") {
+              Get-ChildItem -LiteralPath "$installDir\`$_63_" | Move-Item -Destination "$installDir\" -Force
+              Remove-Item -LiteralPath "$installDir\`$_63_" -Force
           }
+          Remove-Item -LiteralPath "$installDir\`$PLUGINSDIR" -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item -Path $installer -Force -ErrorAction SilentlyContinue
+
+          # 校验解包有效性
+          if (!(Test-Path "$installDir\libgtk-3-0.dll")) {
+              throw "GTK3 解包失败：未找到 $installDir\libgtk-3-0.dll"
+          }
+          Write-Host "GTK3 运行时准备就绪。"
 
       - name: Publish Windows App
         shell: pwsh
         run: |
-          dotnet publish GTK_ImgsToPDF/GTK_ImgsToPDF.csproj -c Release -r win-x64 -p:GtkRuntimeSource="${{ runner.temp }}/gtk3-runtime"
+          dotnet publish GTK_ImgsToPDF/GTK_ImgsToPDF.csproj -c Release -r win-x64 -p:GtkRuntimeSource="${{ runner.temp }}\gtk3-runtime"
+          
+          # 校验发布产物中是否成功打包 runtime\
+          if (!(Test-Path "GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish\runtime\bin\libgtk-3-0.dll")) {
+              throw "发布产物验证失败：缺少 runtime\ 运行时目录！"
+          }
+          Write-Host "Windows 应用及 GTK3 运行时已成功发布。"
 
       - name: Package Windows Zip
         shell: pwsh
@@ -92,6 +106,12 @@ jobs:
       - name: Publish Linux App
         run: |
           dotnet publish GTK_ImgsToPDF/GTK_ImgsToPDF.csproj -c Release -r linux-x64
+          
+          # 校验发布产物
+          if [ ! -f "GTK_ImgsToPDF/bin/Release/net10.0/linux-x64/publish/GTK_ImgsToPDF" ]; then
+              echo "发布产物验证失败：缺少可执行文件！"
+              exit 1
+          fi
 
       - name: Package Linux tar.gz
         run: |

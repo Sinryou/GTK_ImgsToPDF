@@ -107,7 +107,7 @@
        覆盖（CI 上从 gvsbuild release 解压到工作目录后指定即可）。
 
        排除项：
-         · 安装器/命令行工具（*.exe，应用不调用任何一个）
+         · 安装器/命令行工具（*.exe，但保留 GLib 进程派生必需的 gspawn-win64-helper*.exe）
          · 安装包本体与残留（gtk.zip、gtk3-runtime\、ssl\）
          · C++ 绑定与可选扩展库（gtkmm/glibmm/atkmm/cairomm/pangomm/libsigc++/libxml++、
            gtksourceview-3/4、girepository、libpeas、libsoup、gnutls/nettle/hogweed/p11-kit/
@@ -154,8 +154,10 @@
                                     $(GtkRuntimeSource)\libjson-glib-*.dll;
                                     $(GtkRuntimeSource)\libgailutil-*.dll;
                                     $(GtkRuntimeSource)\libcairo-script-interpreter-*.dll;
-                                    $(GtkRuntimeSource)\libssp-*.dll;
-                                    $(GtkRuntimeSource)\libjasper-*.dll" />
+                                     $(GtkRuntimeSource)\libssp-*.dll;
+                                     $(GtkRuntimeSource)\libjasper-*.dll" />
+      <_GtkRuntimeHelpers Include="$(GtkRuntimeSource)\gspawn-win64-helper*.exe;
+                                   $(GtkRuntimeSource)\bin\gspawn-win64-helper*.exe" />
       <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*"
                         Exclude="$(GtkRuntimeSource)\*.dll;
                                  $(GtkRuntimeSource)\**\*.exe;
@@ -182,6 +184,7 @@
 
     <RemoveDir Directories="$(_GtkRuntimePublishDir)" Condition="Exists('$(GtkRuntimeSource)')" />
     <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeRootDlls)" DestinationFolder="$(_GtkRuntimePublishDir)\bin" SkipUnchangedFiles="true" />
+    <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeHelpers)" DestinationFolder="$(_GtkRuntimePublishDir)\bin" SkipUnchangedFiles="true" />
     <Copy Condition="Exists('$(GtkRuntimeSource)')" SourceFiles="@(_GtkRuntimeFiles)" DestinationFiles="@(_GtkRuntimeFiles->'$(_GtkRuntimePublishDir)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Message Condition="Exists('$(GtkRuntimeSource)')" Importance="high" Text="已镜像 GTK3 运行时到 $(_GtkRuntimePublishDir)" />
   </Target>

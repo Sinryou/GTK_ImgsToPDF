@@ -170,7 +170,9 @@ namespace ImgsToPDF.Core {
                 CommonUtils.ReportFailure("No source folder was provided; no PDF was generated.");
                 return 0;
             }
-            // 目录顺序由调用方（config.lua）保证
+            // 目录顺序由同一套 config.lua 比较器决定，不信任调用方传入的数组顺序：
+            // 压缩包解压出来的目录次序取决于解压器，跨平台/跨版本并不稳定。
+            Array.Sort(directoryPaths, StringLenComparer.Instance);
             var folders = new List<List<string>>();
             foreach (var directoryPath in directoryPaths) {
                 CSGlobal.ThrowIfCancelled();

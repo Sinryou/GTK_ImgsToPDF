@@ -132,7 +132,7 @@ namespace GTK_ImgsToPDF {
         /// 4. 仅收集实际包含图片的文件夹，过滤空目录与纯子目录容器 ——
         ///    否则每个空目录都会被拉起一个 Core 进程并生成一页空白 PDF。
         /// </summary>
-        public static List<string> RecursiveFolder(string rootPath) {
+        public static List<string> RecursiveFolder(string rootPath, CancellationToken cancellationToken = default) {
             var imageDirs = new List<string>();
             if (string.IsNullOrWhiteSpace(rootPath)) {
                 return imageDirs;
@@ -155,6 +155,7 @@ namespace GTK_ImgsToPDF {
             stack.Push(rootDirInfo);
 
             while (stack.Count > 0) {
+                cancellationToken.ThrowIfCancellationRequested();
                 DirectoryInfo currentDir = stack.Pop();
 
                 // 统一去除末尾路径分隔符，防止 "C:\Dir\" 与 "C:\Dir" 在 HashSet 中被视为不同路径

@@ -54,13 +54,6 @@ namespace ImgsToPDF.Core {
         };
 
         /// <summary>
-        /// 非 --fast 模式下，方向属于"镜像类"（2/3/4）而不得不重编码时使用的 JPEG 质量。
-        /// 旋转类（5~8）可以用仿射矩阵表达，不需要重编码。
-        /// 取值来自 config.lua 的 Config.RotatedJpegQuality，缺省 90。
-        /// </summary>
-        private const int DefaultRotatedJpegQuality = 90;
-
-        /// <summary>
         /// 待排入 PDF 的一张图片：iText 图像对象 + 仍需在排版期应用的 EXIF 方向。
         /// 方向留到排版期而不是解码期，是为了让原始字节（尤其是 JPEG）能无损直通 PDF：
         /// 解码期旋转必然要重新编码，会带来画质损失与体积膨胀。
@@ -81,13 +74,6 @@ namespace ImgsToPDF.Core {
         /// EXIF Orientation 中 5~8 属于转置类变换，显示时宽高互换。
         /// </summary>
         private static bool ExifSwapsAxes(ushort orientation) => orientation is 5 or 6 or 7 or 8;
-
-        /// <summary>
-        /// 需要把方向"烘焙"进像素的方向值（2/3/4）。
-        /// 这几种变换含镜像或 180° 旋转，无法用轴对齐的 "a b c d e f" 矩阵表达为
-        /// 缩放矩形，因此必须在解码期完成。
-        /// </summary>
-        private static bool RequiresPixelBake(ushort orientation) => orientation is 2 or 3 or 4;
 
         /// <summary>
         /// 计算把图片按 EXIF 方向放进目标矩形 (x, y, width, height) 的仿射矩阵。
@@ -143,13 +129,6 @@ namespace ImgsToPDF.Core {
             ReadConfiguredQuality(static c => c.FastQuality, 75);
 
         /// <summary>
-        /// 方向为镜像类（2/3/4）而不得不重编码时使用的 JPEG 压缩质量，
-        /// 取自 config.lua 的 Config.RotatedJpegQuality。取高值以尽量贴近"不牺牲画质"的语义。
-        /// </summary>
-        private static long GetRotatedJpegQuality() =>
-            ReadConfiguredQuality(static c => c.RotatedJpegQuality, DefaultRotatedJpegQuality);
-
-        /// <summary>
         /// 用 SkiaSharp 解码。SKImage.FromEncodedData 会自动应用 EXIF 方向
         /// （注意 SKBitmap.Decode 不会，不要换成那个重载）。
         /// </summary>
@@ -161,59 +140,51 @@ namespace ImgsToPDF.Core {
         /// <summary>
         /// 载入图片并生成可直接写入 PDF 的 PageImage。
         ///
-        /// 非 --fast 模式下的三条路径：
-        /// 1. 无 EXIF 方向，或方向为 1 → 原始字节直通，方向留到排版期（零重编码）；
-        /// 2. 方向为 5~8（转置类）→ 原始字节直通，方向用排版期的仿射矩阵应用（零重编码）；
-        /// 3. 方向为 2~4（镜像/180°）→ 矩阵无法表达，只能解码后烘焙进像素再编码。
+        /// 非 --fast 模式：
+        /// 1. iText 能直接嵌入的格式（JPEG/PNG/GIF/BMP/TIFF）→ 原始字节直通，零重编码；
+        /// 2. EXIF 方向无论 2~4 还是 5~8，一律留到排版期由仿射矩阵应用 ——
+        ///    不再把镜像/180° 烘焙进像素，因此不会产生任何有损重编码；
+        /// 3. WebP → iText 不认，解码后无损编码为 PNG。
         ///
         /// --fast 模式下一律解码并按 FastQuality 重编码为 JPEG，以最大化减小体积。
         /// </summary>
         private static PageImage LoadPageImage(string imagePath, bool fastFlag) {
             string extension = System.IO.Path.GetExtension(imagePath);
-            byte[] raw = File.ReadAllBytes(imagePath);
 
-            // TIFF：SkiaSharp 解不了，交给 iText 直通（--fast 下同样不重编码）；
-            // EXIF 方向直接从 TIFF 文件头解析，排版期由仿射矩阵应用。
+            // TIFF：SkiaSharp 没有解码器，任何模式下都只能由 iText 直通（--fast 下也不重编码）。
+            // 必须排在 fast 分支之前，否则会掉进"解码再压缩"的路径并因无解码器而失败。
             if (TiffExtensions.Contains(extension)) {
                 return new PageImage {
-                    Image = ImageDataFactory.Create(raw),
-                    Orientation = JpegExif.GetTiffOrientation(raw)
+                    Image = ImageDataFactory.Create(imagePath),
+                    Orientation = JpegExif.GetTiffOrientation(imagePath)
                 };
             }
 
-            bool isJpeg = ExifOrientationExtensions.Contains(extension);
-
             // --- 开启 fastFlag：常规格式均压缩为指定质量的 JPEG ---
             if (fastFlag) {
-                using var fastBitmap = DecodeBitmap(raw)
+                // 解码与重编码都必须看到完整像素，这里只能整读；
+                // SKImage.FromEncodedData 会把方向烘焙进像素，故无需再传 Orientation
+                using var fastBitmap = DecodeBitmap(File.ReadAllBytes(imagePath))
                     ?? throw new InvalidOperationException("Unsupported or corrupt image data.");
-                // SKImage.FromEncodedData 已把方向烘焙进像素，这里无需再传 Orientation
                 return new PageImage { Image = ImageDataFactory.Create(EncodeJpegOnWhite(fastBitmap, GetFastJpegQuality())) };
             }
 
-            // --- 未开启 fastFlag：优先走原始字节无损直通 ---
-            ushort orientation = isJpeg ? JpegExif.GetOrientation(raw) : (ushort)1;
-
-            // 方向为 1（绝大多数素材）或 5~8（可用矩阵表达）→ 直接直通
-            bool canPassThrough = PassthroughExtensions.Contains(extension)
-                                  && !RequiresPixelBake(orientation);
-            if (canPassThrough) {
+            // --- 未开启 fastFlag：原始字节无损直通 ---
+            // 交给 iText 从文件流读取，避免在托管堆上再复制一整份图片数据；
+            // EXIF 方向只探测文件头（128 KB），同样不需要整读。
+            if (PassthroughExtensions.Contains(extension)) {
+                ushort orientation = ExifOrientationExtensions.Contains(extension)
+                    ? JpegExif.GetOrientation(imagePath)
+                    : (ushort)1;
                 return new PageImage {
-                    Image = ImageDataFactory.Create(raw),
+                    Image = ImageDataFactory.Create(imagePath),
                     Orientation = orientation
                 };
             }
 
-            // 剩余情况必须解码：方向为 2~4 的 JPEG，以及 iText 不认的 WebP
-            using var bitmap = DecodeBitmap(raw)
+            // WebP：iText 不认其字节，必须解码后无损编码为 PNG
+            using var bitmap = DecodeBitmap(File.ReadAllBytes(imagePath))
                 ?? throw new InvalidOperationException("Unsupported or corrupt image data.");
-
-            if (isJpeg) {
-                // 方向 2~4：SKImage 已按方向重排过像素，直接用较高质量重编码
-                return new PageImage { Image = ImageDataFactory.Create(EncodeJpegOnWhite(bitmap, GetRotatedJpegQuality())) };
-            }
-
-            // WebP 等：无损 PNG 输出
             return new PageImage { Image = ImageDataFactory.Create(EncodePng(bitmap)) };
         }
 

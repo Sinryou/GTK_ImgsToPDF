@@ -39,6 +39,63 @@ namespace ImgsToPDF.Core {
         private static readonly byte[] ExifPrefix = [(byte)'E', (byte)'x', (byte)'i', (byte)'f', 0, 0];
 
         /// <summary>
+        /// 读取 EXIF 时最多读取的文件头部字节数。
+        /// JPEG 的单个段长度上限是 64 KB，APP1（EXIF）总是紧跟在 SOI/APP0 之后，
+        /// 128 KB 足以覆盖任何正常文件，从而避免为了取一个方向而整读几 MB 的图片。
+        /// </summary>
+        private const int HeaderProbeBytes = 128 * 1024;
+
+        /// <summary>
+        /// 只读取文件头部，从完整的 JPEG 字节中读取 EXIF Orientation。
+        /// 无 EXIF、无该标签、类型不符或数据损坏时返回 1（表示"无需变换"）。
+        /// </summary>
+        public static ushort GetOrientation(string path) {
+            try {
+                return ParseOrientation(ReadHeader(path));
+            }
+            catch {
+                // 元数据损坏不应导致整张图片被跳过，按"无方向"处理
+                return 1;
+            }
+        }
+
+        /// <summary>
+        /// 只读取文件头部，从 TIFF 字节中读取 EXIF Orientation。
+        /// TIFF 文件头本身即为 ParseTiffOrientation 所解析的 II/MM + 42 + IFD 结构。
+        /// </summary>
+        public static ushort GetTiffOrientation(string path) {
+            try {
+                byte[] raw = ReadHeader(path);
+                if (raw.Length < 8) {
+                    return 1;
+                }
+                return ParseTiffOrientation(raw, 0, raw.Length);
+            }
+            catch {
+                return 1;
+            }
+        }
+
+        /// <summary>
+        /// 读取文件头部若干字节（最多 <see cref="HeaderProbeBytes"/>）。
+        /// 用缓冲流分块读，避免 File.ReadAllBytes 让大图进入大对象堆。
+        /// </summary>
+        private static byte[] ReadHeader(string path) {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536);
+            int length = (int)Math.Min(stream.Length, HeaderProbeBytes);
+            byte[] buffer = new byte[length];
+            int read = 0;
+            while (read < length) {
+                int n = stream.Read(buffer, read, length - read);
+                if (n <= 0) {
+                    break;
+                }
+                read += n;
+            }
+            return read == length ? buffer : buffer[..read];
+        }
+
+        /// <summary>
         /// 从完整的 JPEG 字节中读取 EXIF Orientation。
         /// 无 EXIF、无该标签、类型不符或数据损坏时返回 1（表示"无需变换"）。
         /// </summary>

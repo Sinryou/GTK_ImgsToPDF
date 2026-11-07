@@ -43,8 +43,8 @@ namespace ImgsToPDF.Core {
                 }
                 string msg = cur.Message;
                 if (!string.IsNullOrEmpty(msg) &&
-                    (msg.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                     msg.IndexOf("encrypt", StringComparison.OrdinalIgnoreCase) >= 0)) {
+                    (msg.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+                     msg.Contains("encrypt", StringComparison.OrdinalIgnoreCase))) {
                     return true;
                 }
             }
@@ -267,7 +267,7 @@ namespace ImgsToPDF.Core {
             }
 
             if (response.StartsWith(IpcContracts.RespPasswordPrefix, StringComparison.Ordinal)) {
-                string base64 = response.Substring(IpcContracts.RespPasswordPrefix.Length);
+                string base64 = response[IpcContracts.RespPasswordPrefix.Length..];
                 try {
                     byte[] bytes = Convert.FromBase64String(base64);
                     return System.Text.Encoding.UTF8.GetString(bytes);
@@ -379,7 +379,7 @@ namespace ImgsToPDF.Core {
                 if (string.IsNullOrEmpty(line)) continue;
 
                 if (line.StartsWith(IpcContracts.ManifestOutputPrefix, StringComparison.OrdinalIgnoreCase)) {
-                    customOutput = line.Substring(IpcContracts.ManifestOutputPrefix.Length).Trim();
+                    customOutput = line[IpcContracts.ManifestOutputPrefix.Length..].Trim();
                     continue;
                 }
                 if (line.StartsWith('#')) continue;

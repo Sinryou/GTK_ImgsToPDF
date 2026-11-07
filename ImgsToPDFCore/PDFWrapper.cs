@@ -40,7 +40,7 @@ namespace ImgsToPDF.Core {
         /// </summary>
         public static void PdfMerge(string[] inFiles, string outFile) {
             // 显式指定 List<string>：集合表达式在 string[] 与 List<string> 两个重载间有二义性
-            PdfMerger.PdfMerge(new List<string>(inFiles), outFile);
+            PdfMerger.PdfMerge([.. inFiles], outFile);
         }
 
         /// <summary>

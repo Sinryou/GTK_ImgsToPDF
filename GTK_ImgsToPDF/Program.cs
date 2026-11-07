@@ -897,7 +897,7 @@ namespace GTK_ImgsToPDF {
                             break;
                         }
                         if (line.StartsWith(IpcContracts.ReqPasswordPrefix, StringComparison.Ordinal)) {
-                            string archivePath = line.Substring(IpcContracts.ReqPasswordPrefix.Length);
+                            string archivePath = line[IpcContracts.ReqPasswordPrefix.Length..];
                             string? password = await promptPasswordAsync(archivePath);
                             try {
                                 if (password != null) {

@@ -36,9 +36,9 @@
     <PackageReference Include="CommandLineParser" Version="2.9.1" />
     <PackageReference Include="itext" Version="9.8.0" />
     <PackageReference Include="itext.bouncy-castle-adapter" Version="9.8.0" />
-    <PackageReference Include="SharpCompress" Version="0.50.5" />
-    <PackageReference Include="SkiaSharp" Version="4.153.1" />
-    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.153.1" />
+    <PackageReference Include="SharpCompress" Version="0.50.8" />
+    <PackageReference Include="SkiaSharp" Version="4.155.0" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux.NoDependencies" Version="4.155.0" />
   </ItemGroup>
 
   <!-- 原生库（xlua.dll / libxlua.so 二选一）的目标平台判定。

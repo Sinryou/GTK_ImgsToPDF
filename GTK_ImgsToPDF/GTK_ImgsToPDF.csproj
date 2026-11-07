@@ -128,54 +128,9 @@
     <Warning Condition="!Exists('$(GtkRuntimeSource)')" Text="未找到 GTK3 运行时 '$(GtkRuntimeSource)'，发布产物将不含 runtime\，在未安装 GTK3 的 Windows 机器上无法启动。请用 -p:GtkRuntimeSource=&lt;路径&gt; 指定（例如从 gvsbuild release 解压出的目录）。" />
 
     <ItemGroup Condition="Exists('$(GtkRuntimeSource)')">
-      <_GtkRuntimeRootDlls Include="$(GtkRuntimeSource)\*.dll"
-                           Exclude="$(GtkRuntimeSource)\lib*mm-*.dll;
-                                    $(GtkRuntimeSource)\libglibmm_*.dll;
-                                    $(GtkRuntimeSource)\libsigc-*.dll;
-                                    $(GtkRuntimeSource)\libxml++-*.dll;
-                                    $(GtkRuntimeSource)\libgtksourceview-*.dll;
-                                    $(GtkRuntimeSource)\libgirepository-*.dll;
-                                    $(GtkRuntimeSource)\libpeas*.dll;
-                                    $(GtkRuntimeSource)\libsoup*.dll;
-                                    $(GtkRuntimeSource)\libgnutls-*.dll;
-                                    $(GtkRuntimeSource)\libgmp-*.dll;
-                                    $(GtkRuntimeSource)\libhogweed-*.dll;
-                                    $(GtkRuntimeSource)\libnettle-*.dll;
-                                    $(GtkRuntimeSource)\libp11-kit-*.dll;
-                                    $(GtkRuntimeSource)\libtasn1-*.dll;
-                                    $(GtkRuntimeSource)\libidn2-*.dll;
-                                    $(GtkRuntimeSource)\libunistring-*.dll;
-                                    $(GtkRuntimeSource)\libpsl-*.dll;
-                                    $(GtkRuntimeSource)\libproxy-*.dll;
-                                    $(GtkRuntimeSource)\libsqlite3-*.dll;
-                                    $(GtkRuntimeSource)\libxslt-*.dll;
-                                    $(GtkRuntimeSource)\libexslt-*.dll;
-                                    $(GtkRuntimeSource)\libcroco-*.dll;
-                                    $(GtkRuntimeSource)\libjson-glib-*.dll;
-                                    $(GtkRuntimeSource)\libgailutil-*.dll;
-                                    $(GtkRuntimeSource)\libcairo-script-interpreter-*.dll;
-                                     $(GtkRuntimeSource)\libssp-*.dll;
-                                     $(GtkRuntimeSource)\libjasper-*.dll" />
-      <_GtkRuntimeHelpers Include="$(GtkRuntimeSource)\gspawn-win64-helper*.exe;
-                                   $(GtkRuntimeSource)\bin\gspawn-win64-helper*.exe" />
-      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*"
-                        Exclude="$(GtkRuntimeSource)\*.dll;
-                                 $(GtkRuntimeSource)\**\*.exe;
-                                 $(GtkRuntimeSource)\gtk.zip;
-                                 $(GtkRuntimeSource)\gtk3-runtime\**;
-                                 $(GtkRuntimeSource)\ssl\**;
-                                 $(GtkRuntimeSource)\lib\girepository-1.0\**;
-                                 $(GtkRuntimeSource)\lib\gio\**;
-                                 $(GtkRuntimeSource)\lib\libpeas-1.0\**;
-                                 $(GtkRuntimeSource)\lib\gdk-pixbuf-2.0\**\libpixbufloader-jasper.dll;
-                                 $(GtkRuntimeSource)\share\gtksourceview-3.0\**;
-                                 $(GtkRuntimeSource)\share\gtksourceview-4\**;
-                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.xml;
-                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.dtd;
-                                 $(GtkRuntimeSource)\share\icons\hicolor\*\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;
-                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
+      <_GtkRuntimeRootDlls Include="$(GtkRuntimeSource)\*.dll" Exclude="$(GtkRuntimeSource)\lib*mm-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libglibmm_*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libsigc-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libxml++-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libgtksourceview-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libgirepository-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libpeas*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libsoup*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libgnutls-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libgmp-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libhogweed-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libnettle-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libp11-kit-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libtasn1-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libidn2-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libunistring-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libpsl-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libproxy-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libsqlite3-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libxslt-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libexslt-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libcroco-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libjson-glib-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libgailutil-*.dll;&#xD;&#xA;                                    $(GtkRuntimeSource)\libcairo-script-interpreter-*.dll;&#xD;&#xA;                                     $(GtkRuntimeSource)\libssp-*.dll;&#xD;&#xA;                                     $(GtkRuntimeSource)\libjasper-*.dll" />
+      <_GtkRuntimeHelpers Include="$(GtkRuntimeSource)\gspawn-win64-helper*.exe;&#xD;&#xA;                                   $(GtkRuntimeSource)\bin\gspawn-win64-helper*.exe" />
+      <_GtkRuntimeFiles Include="$(GtkRuntimeSource)\**\*.*" Exclude="$(GtkRuntimeSource)\*.dll;&#xD;&#xA;                                 $(GtkRuntimeSource)\**\*.exe;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk.zip;&#xD;&#xA;                                 $(GtkRuntimeSource)\gtk3-runtime\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\ssl\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\lib\girepository-1.0\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\lib\gio\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\lib\libpeas-1.0\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\lib\gdk-pixbuf-2.0\**\libpixbufloader-jasper.dll;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\gtksourceview-3.0\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\gtksourceview-4\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.xml;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\glib-2.0\schemas\*.dtd;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\hicolor\*\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\256x256\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\512x512\**;&#xD;&#xA;                                 $(GtkRuntimeSource)\share\icons\Adwaita\cursors\**" />
     </ItemGroup>
 
     <PropertyGroup>
@@ -195,8 +150,7 @@
          无需在根目录重复放一份 12MB 的原生库。 -->
   <Target Name="RemovePublishPdbs" AfterTargets="ComputeFilesToPublish">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
-                             Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' or '%(ResolvedFileToPublish.Filename)' == 'libSkiaSharp'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' or '%(ResolvedFileToPublish.Filename)' == 'libSkiaSharp'" />
     </ItemGroup>
   </Target>
 
@@ -221,7 +175,7 @@
   <ItemGroup>
     <PackageReference Include="GtkSharp" Version="3.24.24.95" />
     <!-- GUI 只使用 SkiaSharp 托管层，原生库（libSkiaSharp.dll / libSkiaSharp.so）直接复用 Core\ 下的那一份 -->
-    <PackageReference Include="SkiaSharp" Version="4.153.1" ExcludeAssets="native" />
+    <PackageReference Include="SkiaSharp" Version="4.155.0" ExcludeAssets="native" />
   </ItemGroup>
 
   <ItemGroup>

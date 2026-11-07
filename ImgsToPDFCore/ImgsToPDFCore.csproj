@@ -101,4 +101,6 @@
     </Reference>
   </ItemGroup>
 
+  <Import Project="..\ImgsToPDFShared\ImgsToPDFShared.projitems" Label="Shared" />
+
 </Project>

@@ -2,12 +2,16 @@ using Gdk;
 using Gtk;
 using GTK_ImgsToPDF.Config;
 using GTK_ImgsToPDF.Localization;
+using ImgsToPDF.Shared;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using SkiaSharp;
+// Gtk.Layout 是 GTK 的容器控件，与共享契约里的版式枚举同名；
+// 用别名固定指向共享定义，避免文件内每一处都写全限定名。
+using Layout = ImgsToPDF.Shared.Layout;
 
 namespace GTK_ImgsToPDF {
     public class ImgsToPDF : Gtk.Window {
@@ -38,16 +42,14 @@ namespace GTK_ImgsToPDF {
         /// </summary>
         private volatile bool _isClosing;
 
-        // 定义支持的文件扩展名。
-        // 用 OrdinalIgnoreCase 比较而不是 ToLower()：扩展名与当前区域设置无关
-        // （tr-TR 下 "I".ToLower() 是无点 "ı"，".TIF" 会被误判为不支持），
-        // 同时省掉每个文件一次 ToLower 分配。
-        private readonly HashSet<string> _supportedExtensions = new(StringComparer.OrdinalIgnoreCase) {
-            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp", ".tif", ".tiff", ".jfif", ".pjpeg", ".pjp", ".apng"
-        };
-        private readonly HashSet<string> _supportedCompressedExtensions = new(StringComparer.OrdinalIgnoreCase) {
-            ".zip", ".rar", ".7z"
-        };
+        // 版式下拉框的取值：与 AppendText 的顺序一一对应，
+        // 传参时直接用枚举名而不是下拉框索引，避免"界面顺序"与"枚举数值"耦合。
+        private static readonly Layout[] LayoutChoices = [
+            Layout.Single,
+            Layout.DuplexLeftToRight,
+            Layout.DuplexRightToLeft
+        ];
+
         private CssProvider? _hintStyleProvider;
 
         /// <summary>
@@ -420,7 +422,8 @@ namespace GTK_ImgsToPDF {
                 bool recursive = _recursiveCheck.Active;
                 bool fastMode = _lossyCheck.Active;
                 bool merge = _mergeCheck.Active;
-                int layoutIndex = _layoutCombo.Active;
+                // 传枚举名而不是索引：界面顺序调整不会改变 Core 的解释
+                Layout layout = LayoutChoices[_layoutCombo.Active];
 
                 _hintLabel.Text = Strings.Hint_Generating;
                 // 切换为可见状态并锁定控件
@@ -430,7 +433,7 @@ namespace GTK_ImgsToPDF {
 
                 try {
                     var (failures, warnings) = await Task.Run(() =>
-                        GeneratePdfs(directoryPath, recursive, fastMode, merge, layoutIndex));
+                        GeneratePdfs(directoryPath, recursive, fastMode, merge, layout));
                     if (_isClosing) return;
 
                     _progressBar.Fraction = 1.0;
@@ -525,7 +528,7 @@ namespace GTK_ImgsToPDF {
         /// warnings = 退出码为 0 但 stderr 有内容（PDF 已生成，个别图片被跳过）。
         /// </returns>
         private async Task<(List<string> failures, List<string> warnings)> GeneratePdfs(
-                string directoryPath, bool recursive, bool fastMode, bool merge, int layoutIndex) {
+                string directoryPath, bool recursive, bool fastMode, bool merge, Layout layout) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                               ? "ImgsToPDFCore.exe"
@@ -553,7 +556,7 @@ namespace GTK_ImgsToPDF {
                     await semaphore.WaitAsync();
                     try {
                         if (_isClosing) return;
-                        var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layoutIndex));
+                        var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layout));
                         CollectProcessResult(dirPath, stderr, exitCode, failureQueue, warningQueue);
                     }
                     finally {
@@ -563,12 +566,12 @@ namespace GTK_ImgsToPDF {
                 await Task.WhenAll(tasks);
 
                 if (merge && !_isClosing) {
-                    var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layoutIndex: 0, mergePdfs: true));
+                    var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layout: Layout.Single, mergePdfs: true));
                     CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
                 }
             }
             else if (!_isClosing) {
-                var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layoutIndex));
+                var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layout));
                 CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
             }
 
@@ -600,11 +603,11 @@ namespace GTK_ImgsToPDF {
         /// <summary>
         /// 构造传给 Core 进程的命令行参数
         /// </summary>
-        private static string[] BuildCoreArgs(string path, bool fastMode, int layoutIndex, bool mergePdfs = false) {
+        private static string[] BuildCoreArgs(string path, bool fastMode, Layout layout, bool mergePdfs = false) {
             if (mergePdfs) {
                 return ["-d", path, "--merge-pdfs"];
             }
-            var args = new List<string> { "-d", path, "-l", layoutIndex.ToString() };
+            var args = new List<string> { "-d", path, "-l", layout.ToString() };
             if (fastMode) {
                 args.Add("--fast");
             }
@@ -716,7 +719,7 @@ namespace GTK_ImgsToPDF {
                 }
                 else if (File.Exists(folderPath)) {
                     string extension = System.IO.Path.GetExtension(folderPath);
-                    if (_supportedCompressedExtensions.Contains(extension)) {
+                    if (ImageContracts.ArchiveExtensions.Contains(extension)) {
                         ProcessArchive(folderPath);
                     }
                     else {
@@ -833,7 +836,7 @@ namespace GTK_ImgsToPDF {
 
             if (File.Exists(selectedPath)) {
                 string extension = System.IO.Path.GetExtension(selectedPath);
-                if (_supportedCompressedExtensions.Contains(extension)) {
+                if (ImageContracts.ArchiveExtensions.Contains(extension)) {
                     ProcessArchive(selectedPath);
                 }
                 else {
@@ -859,7 +862,7 @@ namespace GTK_ImgsToPDF {
                 _startBtn.Sensitive = !_isProcessing;
 
                 var candidates = Directory.EnumerateFiles(folderPath)
-                    .Where(file => _supportedExtensions.Contains(System.IO.Path.GetExtension(file)))
+                    .Where(file => ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(file)))
                     .OrderBy(file => file, StringComparer.Ordinal)
                     .ToList();
 

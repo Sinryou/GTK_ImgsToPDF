@@ -1,3 +1,4 @@
+using ImgsToPDF.Shared;
 using iText.IO.Image;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Action;
@@ -7,12 +8,6 @@ using iText.Kernel.Geom;
 using SkiaSharp;
 
 namespace ImgsToPDF.Core {
-    public enum Layout {
-        Single,
-        DuplexLeftToRight,
-        DuplexRightToLeft
-    }
-
     internal class PDFWrapper {
         /// <summary>双页模式下两张图之间的中缝宽度（点）。</summary>
         private const float DuplexPageGap = 10f;

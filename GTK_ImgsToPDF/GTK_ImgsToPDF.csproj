@@ -206,4 +206,6 @@
     <Content Include="pimejaSike.ico" />
   </ItemGroup>
 
+  <Import Project="..\ImgsToPDFShared\ImgsToPDFShared.projitems" Label="Shared" />
+
 </Project>

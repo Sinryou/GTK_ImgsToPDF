@@ -1,10 +1,10 @@
+using ImgsToPDF.Shared;
 using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
 
 namespace ImgsToPDF.Core {
-    internal class CommonUtils
-    {
+    internal class CommonUtils {
         /// <summary>
         /// 本次是否已经上报过失败。供 Program 的结果校验使用：
         /// 已经给出具体原因时就不必再补一条笼统的"没有生成 PDF"。
@@ -33,16 +33,37 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
+        /// 检查异常是否与密码缺失或加密解密失败相关（含 SharpCompress 的 CryptographicException 及嵌套异常）
+        /// </summary>
+        private static bool IsCryptographicException(Exception ex) {
+            for (Exception? cur = ex; cur != null; cur = cur.InnerException) {
+                if (cur is SharpCompress.Common.CryptographicException ||
+                    cur is System.Security.Cryptography.CryptographicException) {
+                    return true;
+                }
+                string msg = cur.Message;
+                if (!string.IsNullOrEmpty(msg) &&
+                    (msg.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                     msg.IndexOf("encrypt", StringComparison.OrdinalIgnoreCase) >= 0)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
         /// 枚举压缩包内的文件条目。Entries 每枚举一次就会重新解析一次压缩包，
         /// 因此只物化一次，后面判空、查加密、解压都复用这一份。
         /// </summary>
-        private static bool TryGetFileEntries(IArchive archive, out List<IArchiveEntry> entries, out string error) {
+        private static bool TryGetFileEntries(IArchive archive, out List<IArchiveEntry> entries, out string error, out bool isPasswordRequired) {
             entries = [];
             error = string.Empty;
+            isPasswordRequired = false;
             try {
                 entries = [.. archive.Entries.Where(e => !e.IsDirectory)];
             }
             catch (Exception ex) {
+                isPasswordRequired = IsCryptographicException(ex);
                 error = $"failed to read the archive entries: {ex.GetType().Name}: {ex.Message}";
                 return false;
             }
@@ -57,8 +78,9 @@ namespace ImgsToPDF.Core {
         /// 把文件条目解压到指定目录。失败时通过 error 给出第一个失败条目的具体原因，
         /// 而不是像原先那样只返回 false 把原因丢掉（上层只能猜成"密码为空或错误"）。
         /// </summary>
-        private static bool ExtraArchive(IReadOnlyList<IArchiveEntry> entries, string outFileDirectory, out string error) {
+        private static bool ExtraArchive(IReadOnlyList<IArchiveEntry> entries, string outFileDirectory, out string error, out bool isPasswordRequired) {
             error = string.Empty;
+            isPasswordRequired = false;
             try {
                 Directory.CreateDirectory(outFileDirectory);
             }
@@ -74,6 +96,7 @@ namespace ImgsToPDF.Core {
                     entry.WriteToDirectory(outFileDirectory, new ExtractionOptions { ExtractFullPath = true, Overwrite = true });
                 }
                 catch (Exception ex) {
+                    isPasswordRequired = IsCryptographicException(ex);
                     error = $"failed to extract entry '{entry.Key}': {ex.GetType().Name}: {ex.Message}";
                     return false;
                 }
@@ -83,10 +106,11 @@ namespace ImgsToPDF.Core {
 
         /// <summary>
         /// 打开压缩包；文件不存在、格式不受支持（OpenArchive 返回 null）或打开异常时返回 null，
-        /// 并通过 error 给出原因（原先这些原因被整体吞掉，IO 错误与"格式不支持"无法区分）
+        /// 并通过 error 给出原因（若遇到头部加密无法打开，isPasswordRequired 将被置为 true）。
         /// </summary>
-        private static IArchive? TryOpenArchive(string fromFilePath, ReaderOptions? options, out string error) {
+        private static IArchive? TryOpenArchive(string fromFilePath, ReaderOptions? options, out string error, out bool isPasswordRequired) {
             error = string.Empty;
+            isPasswordRequired = false;
             if (string.IsNullOrEmpty(fromFilePath)) {
                 error = "no archive path was provided";
                 return null;
@@ -101,17 +125,31 @@ namespace ImgsToPDF.Core {
                     : ArchiveFactory.OpenArchive(fromFilePath, options);
             }
             catch (Exception ex) {
-                error = $"the archive could not be opened ({ex.GetType().Name}: {ex.Message}): {fromFilePath}";
+                if (IsCryptographicException(ex)) {
+                    // RAR/7z 的头部加密：不带密码连目录都读不出来，打开即抛加密异常。
+                    // 这种情况必须标记为"需要密码"，否则调用方会把它当成损坏文件直接放弃。
+                    isPasswordRequired = true;
+                    error = $"the archive is encrypted and requires a password: {fromFilePath}";
+                }
+                else {
+                    error = $"the archive could not be opened ({ex.GetType().Name}: {ex.Message}): {fromFilePath}";
+                }
                 return null;
             }
         }
 
         /// <summary>
-        /// 判断压缩包内是否含加密条目；不支持查询加密标志的实现返回 false（走密码流程兜底）
+        /// 判断压缩包内是否含加密条目；支持检查 IArchive.IsEncrypted 属性及条目级加密。
         /// </summary>
         private static bool ContainsEncryptedEntry(IArchive archive) {
             try {
+                if (archive.IsEncrypted) {
+                    return true;
+                }
                 return archive.Entries.Any(e => !e.IsDirectory && e.IsEncrypted);
+            }
+            catch (Exception ex) when (IsCryptographicException(ex)) {
+                return true;
             }
             catch (NotImplementedException) {
                 // 无法判断时按"未加密"处理：先直接解压，若确实加密会在解压阶段失败，
@@ -121,13 +159,16 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
-        /// 压缩包是否真的需要密码。供 config.lua 区分"解压失败"到底该不该向用户索要密码：
-        /// 原先只要解压失败就会弹密码框，把"条目非法""磁盘错误"等情况误报成"密码错误"。
-        /// 判断不出来时返回 false（不弹框，直接把真实原因上报为失败）。
+        /// 压缩包是否真的需要密码（支持识别条目级加密以及 RAR/7z 头部加密 Header Encryption）。
+        /// 供 config.lua 区分"解压失败"到底该不该向用户索要密码：
+        /// 若为头部加密，无密码打开直接抛异常失败，会被当成损坏文件而跳过密码输入。
         /// </summary>
         public static bool IsArchiveEncrypted(string fromFilePath) {
             CSGlobal.ThrowIfCancelled();
-            var archive = TryOpenArchive(fromFilePath, null, out string openError);
+            var archive = TryOpenArchive(fromFilePath, null, out string openError, out bool isPasswordRequired);
+            if (isPasswordRequired) {
+                return true; // 头部加密：打开时即确定需要密码
+            }
             if (archive == null) {
                 ReportReason(openError);
                 return false;
@@ -138,12 +179,16 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
-        /// 解压缩(支持rar，zip)
+        /// 解压缩（支持 zip、rar、7z 等格式）
         /// </summary>
         /// <param name="fromFilePath">待解压文件全路径</param>
         /// <param name="outFileDirectory">解压文件后目录</param>
         public static bool Decompress(string fromFilePath, string outFileDirectory) {
-            var archive = TryOpenArchive(fromFilePath, null, out string openError);
+            var archive = TryOpenArchive(fromFilePath, null, out string openError, out bool isPasswordRequired);
+            if (isPasswordRequired) {
+                // 头部加密包，打开即需密码：直接返回 false，由调用方（config.lua）走密码流程，无需提前报错
+                return false;
+            }
             if (archive == null) {
                 ReportReason(openError);
                 return false;
@@ -154,12 +199,18 @@ namespace ImgsToPDF.Core {
                 if (ContainsEncryptedEntry(archive)) {
                     return false;
                 }
-                if (!TryGetFileEntries(archive, out var entries, out string entryError)) {
+                if (!TryGetFileEntries(archive, out var entries, out string entryError, out bool entryPwdRequired)) {
+                    if (entryPwdRequired) {
+                        return false;
+                    }
                     ReportReason($"failed to extract '{fromFilePath}': {entryError}");
                     return false;
                 }
-                if (ExtraArchive(entries, outFileDirectory, out string error)) {
+                if (ExtraArchive(entries, outFileDirectory, out string error, out bool extractPwdRequired)) {
                     return true;
+                }
+                if (extractPwdRequired) {
+                    return false;
                 }
                 ReportReason($"failed to extract '{fromFilePath}': {error}");
                 return false;
@@ -167,28 +218,108 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
-        /// 解压缩加密的包(不支持rar，支持zip)
+        /// 解压缩加密的包（支持 zip、rar、7z 等格式）
         /// </summary>
         /// <param name="fromFilePath">待解压文件全路径</param>
         /// <param name="outFileDirectory">解压文件后目录</param>
         /// <param name="password">密码</param>
         public static bool Decompress(string fromFilePath, string outFileDirectory, string password) {
-            var archive = TryOpenArchive(fromFilePath, new ReaderOptions { Password = password }, out string openError);
+            var archive = TryOpenArchive(fromFilePath, new ReaderOptions { Password = password }, out string openError, out _);
             if (archive == null) {
                 ReportReason(openError);
                 return false;
             }
             using (archive) {
-                if (!TryGetFileEntries(archive, out var entries, out string entryError)) {
+                if (!TryGetFileEntries(archive, out var entries, out string entryError, out _)) {
                     ReportReason($"failed to extract '{fromFilePath}' with the given password: {entryError}");
                     return false;
                 }
-                if (ExtraArchive(entries, outFileDirectory, out string error)) {
+                if (ExtraArchive(entries, outFileDirectory, out string error, out _)) {
                     return true;
                 }
                 ReportReason($"failed to extract '{fromFilePath}' with the given password: {error}");
                 return false;
             }
+        }
+
+        /// <summary>
+        /// 请求解压密码。
+        /// 若由 GUI 调起，通过 stdout 向 GUI 发起协议请求并等待回传；
+        /// 若由命令行直接运行，在控制台中提示输入密码（支持终端掩码输入）。
+        /// 返回 null 或空字符串表示用户取消或未提供密码。
+        /// </summary>
+        public static string? PromptPassword(string archivePath) {
+            CSGlobal.ThrowIfCancelled();
+            if (!CSGlobal.IsGuiMode) {
+                return PromptConsolePassword(archivePath);
+            }
+
+            // GUI 模式：向标准输出写入约定的密码请求指令
+            Console.WriteLine($"{IpcContracts.ReqPasswordPrefix}{archivePath}");
+            Console.Out.Flush();
+
+            // 等待 GUI 回传（最长等待 10 分钟）
+            string? response = CSGlobal.WaitForStdinLine(TimeSpan.FromMinutes(10));
+            CSGlobal.ThrowIfCancelled();
+
+            if (string.IsNullOrEmpty(response) || response == IpcContracts.CancelToken) {
+                return null;
+            }
+
+            if (response.StartsWith(IpcContracts.RespPasswordPrefix, StringComparison.Ordinal)) {
+                string base64 = response.Substring(IpcContracts.RespPasswordPrefix.Length);
+                try {
+                    byte[] bytes = Convert.FromBase64String(base64);
+                    return System.Text.Encoding.UTF8.GetString(bytes);
+                }
+                catch (Exception ex) {
+                    Console.Error.WriteLine($"[ImgsToPDFCore] Failed to decode password from GUI: {ex.Message}");
+                    return null;
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// 在终端/控制台提示用户输入密码。
+        /// 若处于非重定向的交互式控制台，支持 '*' 掩码输入、退格修正及 Enter 提交。
+        /// 若输入被重定向（如自动化脚本/管道），回退到 Console.ReadLine()。
+        /// </summary>
+        private static string? PromptConsolePassword(string archivePath) {
+            CSGlobal.ThrowIfCancelled();
+            string archiveName = Path.GetFileName(archivePath);
+
+            if (Console.IsInputRedirected) {
+                Console.Error.WriteLine($"[ImgsToPDFCore] Reading password for '{archiveName}' from redirected standard input...");
+                return Console.ReadLine();
+            }
+
+            Console.Write($"Enter password for '{archiveName}': ");
+            var sb = new System.Text.StringBuilder();
+            while (true) {
+                CSGlobal.ThrowIfCancelled();
+                ConsoleKeyInfo keyInfo = Console.ReadKey(intercept: true);
+                if (keyInfo.Key == ConsoleKey.Enter) {
+                    Console.WriteLine();
+                    break;
+                }
+                if (keyInfo.Key == ConsoleKey.Escape) {
+                    Console.WriteLine();
+                    return null; // 用户取消
+                }
+                if (keyInfo.Key == ConsoleKey.Backspace) {
+                    if (sb.Length > 0) {
+                        sb.Length--;
+                        Console.Write("\b \b");
+                    }
+                }
+                else if (!char.IsControl(keyInfo.KeyChar)) {
+                    sb.Append(keyInfo.KeyChar);
+                    Console.Write("*");
+                }
+            }
+            return sb.ToString();
         }
     }
 }

@@ -73,9 +73,6 @@
     <None Update="Modules\unicode.lua">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <None Update="Modules\VisualGTK.lua">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <!-- 原生库按 _TargetRuntimeIdentifier 二选一，判定依据见该属性的定义处 -->
     <None Update="xlua.dll" Condition="$(_TargetRuntimeIdentifier.Contains('win'))">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

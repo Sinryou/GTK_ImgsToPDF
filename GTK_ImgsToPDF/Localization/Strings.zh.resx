@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <root>
   <!-- 
     Microsoft ResX Schema 
@@ -140,6 +140,15 @@
   </data>
   <data name="Dialog_OK" xml:space="preserve">
     <value>确定</value>
+  </data>
+  <data name="Dialog_PasswordPrompt" xml:space="preserve">
+    <value>请输入压缩包 &quot;{0}&quot; 的密码：</value>
+  </data>
+  <data name="Dialog_PasswordTitle" xml:space="preserve">
+    <value>加密压缩包</value>
+  </data>
+  <data name="Dialog_ShowPassword" xml:space="preserve">
+    <value>显示密码</value>
   </data>
   <data name="Drop_NotExist" xml:space="preserve">
     <value>拖入的路径不存在</value>

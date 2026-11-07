@@ -92,8 +92,8 @@
        DLL，deps.json 里也没有 native 条目；Windows 上运行必须有 GTK3 运行时。
        两个加载点都按「程序目录下的 runtime\bin（回退 runtime\）」查找，因此这里只镜像这一个目录：
          · GUI   —— Program.cs 的 SetDllDirectory(<BaseDirectory>\runtime\bin)
-         · Core  —— Core\Modules\VisualGTK.lua 的第三条回退路径 <app>\runtime\bin
-                     （Core 的工作目录是 <app>\Core，故 <cwd>\..\runtime\bin）
+       Core 子进程不加载 GTK：密码输入已改为 GUI 侧对话框 + stdout/stdin IPC，
+       原先由 Core 内 Modules\VisualGTK.lua 自绘的窗口已删除。
 
        注意：顶层 *.dll 必须放在 runtime\bin\ 下，不能直接平铺在 runtime\ 根部。
        原因：GLib 的 g_win32_get_package_installation_directory_of_module 会从 DLL 所在目录

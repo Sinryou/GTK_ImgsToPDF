@@ -4,7 +4,6 @@ local common = require("Modules.Common")
 local pathUtil = require("Modules.PathUtil")
 local unicode = require("Modules.unicode")
 local osUtil = require("Modules.OSUtil")
-local visualGTK = require("Modules.VisualGTK")
 local u2a = unicode.u2a
 local a2u = unicode.a2u
 
@@ -188,17 +187,37 @@ function Config:PreProcess(...)
     pdfFileName = pathUtil.fileNameWithoutExtension(path) or "Output"
     outputDir = pathUtil.dirPath(path)
     tempExtraPath = outputDir .. "/" .. pdfFileName .. os.date("%Y%m%d%H%M%S")
-    local _, result = pcall(commonUtils.Decompress, path, tempExtraPath)
-    if not result then
-        -- 只有确实是加密包才去问密码。否则把解压失败的真实原因（条目非法、磁盘错误等）
-        -- 直接上报，免得像以前那样一律提示"密码为空或错误"，用户输多少次密码都没用。
-        if not commonUtils.IsArchiveEncrypted(path) then
-            commonUtils.ReportFailure("Failed to extract the archive; no PDF was generated: " .. tostring(path))
+
+    -- 先判断是否需要密码，再决定怎么解压。
+    -- IsArchiveEncrypted 对头部加密（RAR/7z Header Encryption）尤其关键：
+    -- 这种包不带密码连目录都读不出来，打开即抛异常，必须先识别出来才能走密码流程。
+    -- 它同样可能抛异常（例如压缩包被截断），一并兜住并按"判断不出来"处理。
+    local encryptedOk, encrypted = pcall(commonUtils.IsArchiveEncrypted, path)
+    if not encryptedOk then
+        commonUtils.ReportFailure("Failed to extract the archive; no PDF was generated: " .. tostring(path))
+        return
+    end
+    if not encrypted then
+        -- pcall 的返回值是 (ok, ...)。必须同时检查 ok：C# 抛出的异常会被 XLua 转成
+        -- 一个"字符串"错误对象返回，而字符串在 Lua 里为真——只看第二个返回值会把
+        -- "解压抛异常"误判成"解压成功"，然后继续在空目录上跑，最后报成"压缩包里没有图片"。
+        local ok, result = pcall(commonUtils.Decompress, path, tempExtraPath)
+        if not ok or not result then
+            commonUtils.ReportFailure("Failed to extract the archive: " .. tostring(result))
             return
         end
-        local password = visualGTK.InputBox("Input password:", "Encrypted Compress File")
-        if common.isEmpty(password) or not commonUtils.Decompress(path, tempExtraPath, password) then
-            -- 密码为空或密码错误：必须上报，否则上层会把"什么都没生成"当成生成成功
+    else
+        -- 密码框由 GUI 主窗口弹出（IPC 协议），命令行调用则走控制台掩码输入
+        local password = commonUtils.PromptPassword(path)
+        if common.isEmpty(password) then
+            commonUtils.ReportFailure(
+                "Extraction cancelled or no password provided; no PDF was generated: " .. tostring(path))
+            return
+        end
+        -- 带密码解压这一路同样可能抛异常，不能让它逃逸
+        local pwdOk, pwdResult = pcall(commonUtils.Decompress, path, tempExtraPath, password)
+        if not pwdOk or not pwdResult then
+            -- 密码为空、密码错误或解压抛异常：必须上报，否则上层会把"什么都没生成"当成生成成功
             commonUtils.ReportFailure(
                 "Failed to extract the archive (empty or wrong password); no PDF was generated: " .. tostring(path))
             return

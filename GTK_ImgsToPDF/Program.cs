@@ -42,6 +42,11 @@ namespace GTK_ImgsToPDF {
         /// </summary>
         private volatile bool _isClosing;
 
+        /// <summary>
+        /// 避免并发的 Core 进程同时弹出多个密码输入窗口，将密码输入串行化
+        /// </summary>
+        private readonly SemaphoreSlim _passwordPromptLock = new(1, 1);
+
         // 版式下拉框的取值：与 AppendText 的顺序一一对应，
         // 传参时直接用枚举名而不是下拉框索引，避免"界面顺序"与"枚举数值"耦合。
         private static readonly Layout[] LayoutChoices = [
@@ -556,7 +561,7 @@ namespace GTK_ImgsToPDF {
                     await semaphore.WaitAsync();
                     try {
                         if (_isClosing) return;
-                        var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layout));
+                        var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(dirPath, fastMode, layout), PromptPasswordOnUiAsync);
                         CollectProcessResult(dirPath, stderr, exitCode, failureQueue, warningQueue);
                     }
                     finally {
@@ -566,12 +571,12 @@ namespace GTK_ImgsToPDF {
                 await Task.WhenAll(tasks);
 
                 if (merge && !_isClosing) {
-                    var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layout: Layout.Single, mergePdfs: true));
+                    var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode: false, layout: Layout.Single, mergePdfs: true), PromptPasswordOnUiAsync);
                     CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
                 }
             }
             else if (!_isClosing) {
-                var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layout));
+                var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layout), PromptPasswordOnUiAsync);
                 CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
             }
 
@@ -622,12 +627,58 @@ namespace GTK_ImgsToPDF {
             return dirs;
         }
         /// <summary>
-        /// 运行给定的命令，返回得到的标准输出及标准错误。
+        /// 在 UI 线程弹出密码输入框并等待用户输入或取消。
+        /// Core 子进程通过 stdout 的 ::__REQ_PASSWORD__:: 指令发起请求，
+        /// 这里把结果（或取消指令）回写到它的 stdin。
+        /// </summary>
+        /// <param name="archivePath">需要解压的压缩包路径</param>
+        /// <returns>用户输入的密码；取消或窗口正在关闭时返回 null</returns>
+        private async Task<string?> PromptPasswordOnUiAsync(string archivePath) {
+            if (_isClosing) {
+                return null;
+            }
+
+            await _passwordPromptLock.WaitAsync();
+            try {
+                if (_isClosing) {
+                    return null;
+                }
+
+                var tcs = new TaskCompletionSource<string?>();
+                // GTK 控件只能在主线程操作：Application.Invoke 把弹窗排进主循环，
+                // 后台读取线程在此 await，不阻塞主线程
+                Application.Invoke((_, _) => {
+                    try {
+                        if (_isClosing) {
+                            tcs.TrySetResult(null);
+                            return;
+                        }
+                        using var dialog = new PasswordDialog(archivePath, this);
+                        tcs.TrySetResult(dialog.Run() == (int)ResponseType.Ok ? dialog.Password : null);
+                    }
+                    catch (Exception ex) {
+                        tcs.TrySetException(ex);
+                    }
+                });
+                return await tcs.Task;
+            }
+            finally {
+                _passwordPromptLock.Release();
+            }
+        }
+
+        /// <summary>
+        /// 运行给定的命令，返回标准输出、标准错误与退出码。
+        /// 监听标准输出并拦截密码请求指令（::__REQ_PASSWORD__::），
+        /// 通过回调在界面线程弹出密码框，再把结果经标准输入回传。
         /// stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁。
         /// </summary>
         /// <param name="fileName">需要运行的指令</param>
+        /// <param name="args">命令行参数列表</param>
+        /// <param name="promptPasswordAsync">密码输入交互回调</param>
         /// <returns>元组：(stdout:标准输出, stderr:标准错误, exitCode:进程退出码)</returns>
-        private static async Task<(string stdout, string stderr, int exitCode)> RunProcessAsync(string fileName, string[] args) {
+        private static async Task<(string stdout, string stderr, int exitCode)> RunProcessAsync(
+                string fileName, string[] args, Func<string, Task<string?>> promptPasswordAsync) {
             using Process p = new();
             p.StartInfo.FileName = fileName;
             p.StartInfo.ArgumentList.Clear();
@@ -653,15 +704,53 @@ namespace GTK_ImgsToPDF {
 
             p.Start();
 
-            // stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁
-            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            // 逐行读 stdout：密码请求指令会被拦截并在界面线程弹窗，其余行照常累积。
+            // stderr 同时异步读，否则管道缓冲写满时会互相阻塞导致死锁。
+            var stdoutSb = new System.Text.StringBuilder();
+            var stdoutTask = Task.Run(async () => {
+                try {
+                    while (true) {
+                        string? line = await p.StandardOutput.ReadLineAsync();
+                        if (line == null) {
+                            break;
+                        }
+                        if (line.StartsWith(IpcContracts.ReqPasswordPrefix, StringComparison.Ordinal)) {
+                            string archivePath = line.Substring(IpcContracts.ReqPasswordPrefix.Length);
+                            string? password = await promptPasswordAsync(archivePath);
+                            try {
+                                if (password != null) {
+                                    // 密码可能含换行/引号等字符，先 UTF-8 + Base64 再走单行管道
+                                    string base64 = Convert.ToBase64String(
+                                        System.Text.Encoding.UTF8.GetBytes(password));
+                                    await p.StandardInput.WriteLineAsync($"{IpcContracts.RespPasswordPrefix}{base64}");
+                                }
+                                else {
+                                    await p.StandardInput.WriteLineAsync(IpcContracts.CancelToken);
+                                }
+                                await p.StandardInput.FlushAsync();
+                            }
+                            catch {
+                                // 进程已退出或管道已关闭
+                            }
+                        }
+                        else {
+                            stdoutSb.AppendLine(line);
+                        }
+                    }
+                }
+                catch {
+                    // 读取异常（如子进程被强制终止导致管道损坏）
+                }
+                return stdoutSb.ToString();
+            });
+
             var stderrTask = p.StandardError.ReadToEndAsync();
-            await Task.WhenAll(stdoutTask, stderrTask);
+            var outputs = await Task.WhenAll(stdoutTask, stderrTask);
             await p.WaitForExitAsync();
 
             // 退出码用于区分"真的失败"（CommonUtils.ReportFailure 会把它设为 1）
             // 与"PDF 已生成、只是个别图片被跳过"（stderr 有内容但退出码为 0）
-            return (stdoutTask.Result, stderrTask.Result, p.ExitCode);
+            return (outputs[0], outputs[1], p.ExitCode);
         }
 
         /// <summary>

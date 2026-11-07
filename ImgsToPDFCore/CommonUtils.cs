@@ -2,8 +2,7 @@ using SharpCompress.Archives;
 using SharpCompress.Common;
 using SharpCompress.Readers;
 
-namespace ImgsToPDFCore
-{
+namespace ImgsToPDF.Core {
     internal class CommonUtils
     {
         /// <summary>

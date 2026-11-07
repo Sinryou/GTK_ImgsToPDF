@@ -54,6 +54,7 @@
   <PropertyGroup>
     <_TargetRuntimeIdentifier Condition="'$(_TargetRuntimeIdentifier)' == ''">$(RuntimeIdentifier)</_TargetRuntimeIdentifier>
     <_TargetRuntimeIdentifier Condition="'$(_TargetRuntimeIdentifier)' == ''">$(NETCoreSdkRuntimeIdentifier)</_TargetRuntimeIdentifier>
+    <RootNamespace>ImgsToPDF.Core</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>

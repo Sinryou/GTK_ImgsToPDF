@@ -10,8 +10,8 @@ local a2u = unicode.a2u
 
 local iPageSize = CS.iText.Kernel.Geom.PageSize
 local iRectangle = CS.iText.Kernel.Geom.Rectangle
-local commonUtils = CS.ImgsToPDFCore.CommonUtils
-local PDFWrapper = CS.ImgsToPDFCore.PDFWrapper
+local commonUtils = CS.ImgsToPDF.Core.CommonUtils
+local PDFWrapper = CS.ImgsToPDF.Core.PDFWrapper
 
 -- add your local funcs below
 -- 建议在这个部分添加你自己要用到的函数

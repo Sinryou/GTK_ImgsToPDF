@@ -6,7 +6,7 @@ using iText.Kernel.Pdf.Navigation;
 using iText.Kernel.Geom;
 using SkiaSharp;
 
-namespace ImgsToPDFCore {
+namespace ImgsToPDF.Core {
     public enum Layout {
         Single,
         DuplexLeftToRight,

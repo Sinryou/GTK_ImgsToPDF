@@ -1,4 +1,4 @@
-using ImgsToPDFCore;
+using ImgsToPDF.Core;
 using XLua;
 
 /// <summary>

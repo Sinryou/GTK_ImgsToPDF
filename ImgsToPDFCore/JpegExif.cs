@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace ImgsToPDFCore {
+namespace ImgsToPDF.Core {
     /// <summary>
     /// 从 JPEG 的 APP1/EXIF 段中只解析出 Orientation（方向）标签，
     /// 不解码任何像素数据。

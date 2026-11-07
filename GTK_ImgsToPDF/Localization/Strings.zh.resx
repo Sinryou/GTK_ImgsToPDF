@@ -154,10 +154,10 @@
     <value>所选文件夹及其子文件夹中没有找到受支持的图片。</value>
   </data>
   <data name="Menu_ChooseImages" xml:space="preserve">
-    <value>选择图片组(&amp;I)</value>
+    <value>选择图片组(_I)</value>
   </data>
   <data name="Menu_ChoosePdfs" xml:space="preserve">
-    <value>选择PDF(&amp;P)</value>
+    <value>选择PDF(_P)</value>
   </data>
   <data name="Path_SelectedImages" xml:space="preserve">
     <value>[{0} 张图片] {1}</value>

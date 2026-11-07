@@ -94,7 +94,9 @@ end
 -- 也可以设为 iPageSize.A4 / iPageSize.B5 等（支持 A0~A10、B0~B10、LETTER、LEGAL 等），
 -- 此时图片会等比缩放并居中，页边距由居中的偏移量决定。
 -- 或 Config.PageSizeToSave = iRectangle(0, 0, width, height)
-Config.PageSizeToSave = iPageSize.NoResize
+-- 注意：iText 没有 NoResize 这个页尺寸，写 iPageSize.NoResize 实际求值为 nil，
+-- 虽然行为与下面这行一致，但会让人误以为存在这样一个常量。
+Config.PageSizeToSave = nil
 
 -- 开启 --fast 时的 JPEG 压缩质量（1~100，默认 75；数值越小体积越小，数值越大画质越好）
 -- @type int

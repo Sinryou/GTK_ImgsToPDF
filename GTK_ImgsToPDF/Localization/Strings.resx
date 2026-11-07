@@ -154,10 +154,10 @@
     <value>No supported images were found in the selected folder or its subfolders.</value>
   </data>
   <data name="Menu_ChooseImages" xml:space="preserve">
-    <value>Choose Images(&amp;I)</value>
+    <value>Choose _Images</value>
   </data>
   <data name="Menu_ChoosePdfs" xml:space="preserve">
-    <value>Choose PDFs(&amp;P)</value>
+    <value>Choose _PDFs</value>
   </data>
   <data name="Path_SelectedImages" xml:space="preserve">
     <value>[{0} Images] {1}</value>

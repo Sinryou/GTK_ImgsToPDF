@@ -150,7 +150,10 @@ namespace GTK_ImgsToPDF {
                 return imageDirs;
             }
 
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // 去重语义必须与文件系统一致（见 PathContracts）：
+            // Windows 上 "D:\Pics" 与 "d:\pics" 是同一目录，忽略大小写才不会重复处理；
+            // Linux 上它们是两个真实目录，忽略大小写会把其中一份的图片静默丢掉。
+            var visited = new HashSet<string>(PathContracts.Comparer);
             var stack = new Stack<DirectoryInfo>();
             stack.Push(rootDirInfo);
 

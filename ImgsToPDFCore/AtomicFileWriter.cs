@@ -1,3 +1,4 @@
+using ImgsToPDF.Shared;
 using System.Collections.Concurrent;
 
 namespace ImgsToPDF.Core {
@@ -13,8 +14,10 @@ namespace ImgsToPDF.Core {
         /// <summary>
         /// 本次进程内正在写出的临时文件。用于进程被强杀（GUI 关闭、看门狗超时、未处理异常）时
         /// 在退出前统一清理，避免在用户图片目录留下 *.pdf.tmp。
+        /// 键的大小写语义跟随文件系统（见 PathContracts）：Linux 上 "A.pdf.tmp" 与 "a.pdf.tmp"
+        /// 是两个不同文件，若按忽略大小写建键，后写入的一笔会顶掉前一笔，被顶掉的那个再也清不掉。
         /// </summary>
-        private static readonly ConcurrentDictionary<string, byte> ActiveTempFiles = new(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, byte> ActiveTempFiles = new(PathContracts.Comparer);
 
         static AtomicFileWriter() {
             // 兜底：无论进程以何种方式退出（未处理异常、Environment.Exit），都尽量清掉写了一半的临时文件。

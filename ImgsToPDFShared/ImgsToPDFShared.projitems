@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="$(MSBuildThisFileDirectory)LayoutContracts.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)PathContracts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)ImageContracts.cs" />
     <Compile Include="$(MSBuildThisFileDirectory)IpcContracts.cs" />
   </ItemGroup>

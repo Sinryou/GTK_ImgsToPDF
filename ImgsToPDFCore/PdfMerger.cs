@@ -1,3 +1,4 @@
+using ImgsToPDF.Shared;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Action;
 using iText.Kernel.Pdf.Navigation;
@@ -8,15 +9,9 @@ namespace ImgsToPDF.Core {
     /// 支持基础合并、单层级书签合并及基于目录结构的多层级深度书签树合并。
     /// </summary>
     internal static class PdfMerger {
-        /// <summary>
-        /// 路径比较策略：Windows 下文件系统不区分大小写，路径字典必须用同一语义，
-        /// 否则 "D:\A" 与 "d:\a" 会被当成两个文件夹，书签树里出现重复的同名节点。
-        /// </summary>
-        private static readonly StringComparer PathComparer =
-            OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-
-        private static readonly StringComparison PathComparison =
-            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        // 路径比较语义统一取自 PathContracts：Windows 下文件系统不区分大小写，
+        // 路径字典必须用同一语义，否则 "D:\A" 与 "d:\a" 会被当成两个文件夹，
+        // 书签树里出现重复的同名节点。
 
         /// <summary>
         /// 合并PDF文件
@@ -131,10 +126,10 @@ namespace ImgsToPDF.Core {
             var folders = new List<string>();
             string root = NormalizeDir(rootPath);
             string dir = NormalizeDir(System.IO.Path.GetDirectoryName(filePath));
-            while (!string.IsNullOrEmpty(dir) && !string.Equals(dir, root, PathComparison)) {
+            while (!string.IsNullOrEmpty(dir) && !string.Equals(dir, root, PathContracts.Comparison)) {
                 folders.Add(dir);
                 string parent = NormalizeDir(System.IO.Path.GetDirectoryName(dir));
-                if (string.IsNullOrEmpty(parent) || string.Equals(parent, dir, PathComparison)) {
+                if (string.IsNullOrEmpty(parent) || string.Equals(parent, dir, PathContracts.Comparison)) {
                     return [];   // 一直到根目录都没遇到 root
                 }
                 dir = parent;
@@ -181,7 +176,7 @@ namespace ImgsToPDF.Core {
             }
 
             // 2. 每个文件夹的书签锚点页
-            var folderAnchor = new Dictionary<string, int>(PathComparer);
+            var folderAnchor = new Dictionary<string, int>(PathContracts.Comparer);
             foreach (var (file, startPage, _) in plan) {
                 foreach (var folder in AncestorFolders(root, file)) {
                     if (!folderAnchor.ContainsKey(folder)) {
@@ -219,12 +214,12 @@ namespace ImgsToPDF.Core {
 
                 // 按"所在文件夹"分组，便于按页面顺序递归建树
                 var filesByDir = plan
-                    .GroupBy(p => NormalizeDir(System.IO.Path.GetDirectoryName(p.File)), PathComparer)
-                    .ToDictionary(g => g.Key, g => g.OrderBy(p => p.StartPage).ToList(), PathComparer);
+                    .GroupBy(p => NormalizeDir(System.IO.Path.GetDirectoryName(p.File)), PathContracts.Comparer)
+                    .ToDictionary(g => g.Key, g => g.OrderBy(p => p.StartPage).ToList(), PathContracts.Comparer);
                 var subFoldersByDir = folderAnchor.Keys
-                    .Where(f => !string.Equals(f, root, PathComparison))
-                    .GroupBy(f => NormalizeDir(System.IO.Path.GetDirectoryName(f)), PathComparer)
-                    .ToDictionary(g => g.Key, g => g.ToList(), PathComparer);
+                    .Where(f => !string.Equals(f, root, PathContracts.Comparison))
+                    .GroupBy(f => NormalizeDir(System.IO.Path.GetDirectoryName(f)), PathContracts.Comparer)
+                    .ToDictionary(g => g.Key, g => g.ToList(), PathContracts.Comparer);
 
                 PdfOutline CreateOutline(PdfOutline parent, int page, string title) {
                     var action = PdfAction.CreateGoTo(
@@ -240,7 +235,7 @@ namespace ImgsToPDF.Core {
                 // 同一层内按锚点页排序建节点，书签面板的顺序就与正文顺序一致；
                 // 递归进入子文件夹只会往子节点里加内容，不会打乱本层的顺序
                 void BuildTree(PdfOutline parentNode, string dir) {
-                    bool isRootLevel = string.Equals(dir, root, PathComparison);
+                    bool isRootLevel = string.Equals(dir, root, PathContracts.Comparison);
                     var entries = new List<(int Page, bool IsFolder, string Path)>();
                     if (subFoldersByDir.TryGetValue(dir, out var subFolders)) {
                         foreach (var folder in subFolders) {

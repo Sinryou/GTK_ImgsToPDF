@@ -1,3 +1,4 @@
+using ImgsToPDF.Shared;
 using iText.IO.Image;
 using SkiaSharp;
 
@@ -7,16 +8,6 @@ namespace ImgsToPDF.Core {
     /// 负责将磁盘文件安全转换为适合写入 PDF 的 PageImage 对象。
     /// </summary>
     internal static class PdfImagePipeline {
-        /// <summary>
-        /// 支持的图片扩展名。用 OrdinalIgnoreCase 比较而不是 ToLower()：
-        /// 扩展名来自文件系统，与当前区域设置无关 —— tr-TR 下 "I".ToLower() 是无点 "ı"，
-        /// 会把 ".TIF" 判成不支持而静默丢图；顺带省掉每个文件一次 ToLower 分配。
-        /// </summary>
-        private static readonly HashSet<string> SupportedImageExtensions = new(StringComparer.OrdinalIgnoreCase) {
-            ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
-            ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
-        };
-
         /// <summary>
         /// iText 能直接嵌入 PDF 的格式：这些格式在非 --fast 模式下走"原始字节直通"，
         /// 由 iText 按 DCTDecode / FlateDecode 原样写入，不经过解码与重编码。
@@ -63,7 +54,7 @@ namespace ImgsToPDF.Core {
         /// 判断文件是否为受支持的图片（供目录枚举过滤，扩展名集合与 GUI 的 ImageContracts 保持一致）。
         /// </summary>
         public static bool IsSupportedImage(string path) =>
-            SupportedImageExtensions.Contains(System.IO.Path.GetExtension(path));
+            ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(path));
 
         /// <summary>
         /// EXIF Orientation 中 5~8 属于转置类变换，显示时宽高互换。

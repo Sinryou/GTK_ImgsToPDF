@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace ImgsToPDF.Shared {
     /// <summary>
     /// GUI 与 Core 双方共同认可的文件格式契约。
@@ -13,11 +10,6 @@ namespace ImgsToPDF.Shared {
         public static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase) {
             ".png", ".apng", ".jpg", ".jpeg", ".jfif", ".pjpeg",
             ".pjp", ".bmp", ".tif", ".tiff", ".gif", ".webp"
-        };
-
-        /// <summary>可能含有 EXIF Orientation 信息的图片格式扩展名。</summary>
-        public static readonly HashSet<string> ImageExtensionsEXIFOrientation = new(StringComparer.OrdinalIgnoreCase) {
-            ".jpg", ".jpeg", ".jfif", ".pjpeg", ".pjp", ".tif", ".tiff"
         };
 
         /// <summary>

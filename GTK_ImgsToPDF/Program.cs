@@ -645,6 +645,12 @@ namespace GTK_ImgsToPDF {
             p.StartInfo.StandardErrorEncoding = utf8NoBom;
             p.StartInfo.CreateNoWindow = true;          // 设置不显示窗口
             p.StartInfo.WorkingDirectory = System.IO.Path.GetDirectoryName(fileName);
+
+            // 显式告知 Core「我是 GUI 拉起的」，它才会开启父进程看门狗：
+            // 该看门狗把 stdin 当作父进程存活管道，一旦读到 EOF 就取消任务并在宽限期后自毁，
+            // 避免 GUI 退出后残留孤儿进程。命令行/脚本调用不会带这个标志。
+            p.StartInfo.Environment[IpcContracts.WatchParentEnvVar] = "1";
+
             p.Start();
 
             // stdout 与 stderr 必须同时异步读取，否则管道缓冲写满时会互相阻塞导致死锁

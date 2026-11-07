@@ -25,8 +25,17 @@ namespace ImgsToPDF.Core {
             // 此时 Windows 下 Console 默认使用 OEM 代码页，而 GUI 侧按 UTF-8 解码，
             // 导致错误信息里含非 ASCII 的文件名/文件夹名变成乱码。
             Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+            Console.InputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
-            StartParentWatchdogIfRedirected();
+            // 看门狗只应由 GUI 显式开启，且该标志不能继承给其它进程，因此读完立刻清掉。
+            // 不用 Console.IsInputRedirected 作判据：它无法区分「GUI 拉起的匿名管道」
+            // 与「任何其它非交互 stdin」（脚本、CI、< NUL），会把正常调用误判成父进程已退出。
+            bool watchParent = string.Equals(
+                Environment.GetEnvironmentVariable(IpcContracts.WatchParentEnvVar), "1", StringComparison.Ordinal);
+            Environment.SetEnvironmentVariable(IpcContracts.WatchParentEnvVar, null);
+
+            CSGlobal.IsGuiMode = watchParent;
+            StartParentWatchdogIfRequested(watchParent);
 
             Parser.Default.ParseArguments<Options>(args)
                 .WithParsed(Run)
@@ -36,34 +45,49 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
-        /// 当由 GUI 以重定向标准输入方式拉起时，后台监听 Stdin 管道 EOF：
-        /// 一旦父进程关闭或异常崩溃，OS 会自动关闭管道写端，ReadByte() 立即返回 -1。
-        /// 先置取消标志让主线程走 finally 清理临时文件与解压目录，超时未退则强制自毁。
+        /// 父进程看门狗：由 GUI 拉起时（见 <see cref="IpcContracts.WatchParentEnvVar"/>），
+        /// 后台监听 Stdin 管道。一旦父进程关闭或异常崩溃，OS 会自动关闭管道写端，
+        /// ReadLine() 立即返回 null。先把取消标志置位，让主线程走 finally 清理临时文件与解压目录；
+        /// 宽限期到期仍未退出才强制自毁。
         /// </summary>
-        private static void StartParentWatchdogIfRedirected() {
-            if (!Console.IsInputRedirected) {
+        private static void StartParentWatchdogIfRequested(bool watchParent) {
+            if (!watchParent || !Console.IsInputRedirected) {
                 return;
             }
             new Thread(() => {
                 try {
-                    using var stdin = Console.OpenStandardInput();
-                    while (stdin.ReadByte() != -1) { }
+                    string? line;
+                    while ((line = Console.ReadLine()) != null) {
+                        CSGlobal.DeliverStdinLine(line);
+                    }
                 }
                 catch {
                     // 管道读取异常同样视为父进程已断开
                 }
 
                 CSGlobal.IsCancelled = true;
+                CSGlobal.DeliverStdinLine(null);
 
                 // 给主线程预留 2 秒宽限期以完成栈展开及 finally 清理（删除 .pdf.tmp 与解压目录）；
-                // 若主线程正阻塞在 InputBox 密码弹窗等无法响应取消检查的位置，到期直接终止进程。
-                Thread.Sleep(2000);
+                // 若主线程正阻塞在密码弹窗等无法响应取消检查的位置，到期直接终止进程。
+                for (int i = 0; i < 20; i++) {
+                    if (CSGlobal.CleanupCompleted) {
+                        return;   // 清理已完成，让主线程自然退出，保留真实退出码
+                    }
+                    Thread.Sleep(100);
+                }
+
+                // 宽限期已到但主线程仍在写文件：临时文件是以 FileShare.Delete 打开的，
+                // 这里删除会把文件标记为“删除待完成”，进程退出、句柄关闭时系统即完成删除，
+                // 从而避免在用户图片目录留下 *.pdf.tmp。
+                AtomicFileWriter.CleanupActiveTempFiles();
                 Environment.Exit(1);
             }) {
                 IsBackground = true,
                 Name = "ParentStdinWatchdog"
             }.Start();
         }
+
         /// <summary>
         /// 使用解析后的命令行参数进行操作。
         /// </summary>
@@ -78,7 +102,7 @@ namespace ImgsToPDF.Core {
                 CSGlobal.luaEnv.DoString(@"config = require 'config';"); // 获取lua内的方法
 
                 CSGlobal.luaConfig = CSGlobal.luaEnv.Global.Get<IConfig>("config");
-                CSGlobal.luaConfig.PreProcess(option.DirectoryPath, option.Layout, option.FastFlag, option.Merge);
+                CSGlobal.luaConfig.PreProcess(Path.GetFullPath(option.DirectoryPath), option.Layout, option.FastFlag, option.Merge);
 
                 VerifyPdfGenerated(startedUtc);
             }
@@ -97,6 +121,11 @@ namespace ImgsToPDF.Core {
                 }
                 catch (Exception ex) {
                     Console.Error.WriteLine($"[ImgsToPDFCore] Failed to clean up temp directory: {ex.Message}");
+                }
+                finally {
+                    // 无论清理是否成功都置位：临时文件/解压目录的清理已经尝试过，
+                    // 此时不该再被看门狗当成“清理未完成”而强制结束进程（那会让退出码退化成 1）。
+                    CSGlobal.CleanupCompleted = true;
                 }
                 CSGlobal.luaEnv.Dispose();
             }

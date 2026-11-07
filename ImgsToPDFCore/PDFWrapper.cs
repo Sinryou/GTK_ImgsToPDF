@@ -12,9 +12,6 @@ namespace ImgsToPDF.Core {
         /// <summary>双页模式下两张图之间的中缝宽度（点）。</summary>
         private const float DuplexPageGap = 10f;
 
-        /// <summary>写出 PDF 时使用的临时文件后缀：先写它，成功后再替换目标文件，失败则删除。</summary>
-        private const string TempFileSuffix = ".tmp";
-
         private static readonly StringComparer PathComparer =
             OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
@@ -327,78 +324,6 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
-        /// 输出文件的统一写法：先写同目录下的临时文件，全部成功后再替换目标文件。好处：
-        /// - 中途失败（磁盘满、编码异常等）不会在目标路径留下半成品 PDF，也不会破坏上一次生成的结果；
-        /// - "无法写入"（被别的程序占用、只读、无权限）会变成一行可读的上报，
-        ///   而不是让进程直接崩掉、用户只看到一句无意义的异常信息。
-        /// </summary>
-        /// <param name="pathToSave">最终输出路径</param>
-        /// <param name="write">真正写文件的回调（内部需自行关闭 PdfDocument 以刷新数据）</param>
-        private static bool WriteToFile(string pathToSave, Action<FileStream> write) {
-            string tempPath = pathToSave + TempFileSuffix;
-            FileStream fs;
-            try {
-                fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write);
-            }
-            catch (Exception ex) {
-                CommonUtils.ReportFailure($"Failed to create the output file '{pathToSave}': {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
-            bool committed = false;
-            try {
-                write(fs);
-                CSGlobal.ThrowIfCancelled();
-                CommitOutputFile(tempPath, pathToSave);
-                committed = true;
-                return true;
-            }
-            catch (Exception ex) {
-                CommonUtils.ReportFailure($"Failed to write the output file '{pathToSave}': {ex.GetType().Name}: {ex.Message}");
-                return false;
-            }
-            finally {
-                // iText 的 PdfDocument/PdfWriter 关闭时会一并关闭流，这里重复 Dispose 无副作用
-                fs.Dispose();
-                if (!committed) {
-                    DiscardOutputFile(tempPath);
-                }
-            }
-        }
-
-        /// <summary>
-        /// 用临时文件替换最终输出。目标已存在时优先用 File.Replace（原子替换），
-        /// 个别文件系统/网络共享不支持时退化为带 overwrite 的 File.Move。
-        /// </summary>
-        private static void CommitOutputFile(string tempPath, string finalPath) {
-            if (File.Exists(finalPath)) {
-                try {
-                    File.Replace(tempPath, finalPath, null);
-                    return;
-                }
-                catch (IOException) {
-                    // 交给下面的 File.Move(overwrite: true) 兜底（例如部分网络共享不支持 Replace）
-                }
-                catch (PlatformNotSupportedException) {
-                }
-            }
-            File.Move(tempPath, finalPath, overwrite: true);
-        }
-
-        /// <summary>
-        /// 删除失败时残留的临时文件（删除本身再失败也不抛异常，以免盖掉真正要上报的错误）
-        /// </summary>
-        private static void DiscardOutputFile(string tempPath) {
-            try {
-                if (File.Exists(tempPath)) {
-                    File.Delete(tempPath);
-                }
-            }
-            catch (Exception ex) {
-                System.Diagnostics.Debug.WriteLine($"[ImgsToPDFCore] Failed to delete temp file '{tempPath}': {ex.Message}");
-            }
-        }
-
-        /// <summary>
         /// 按配置的排序规则列出目录下的图片（目录不存在或读取失败时返回空列表）。
         /// OrderBy 会立即物化，因此连枚举期间抛出的异常也一并被兜住。
         /// </summary>
@@ -469,7 +394,7 @@ namespace ImgsToPDF.Core {
                 return 0;
             }
             int pages = 0;
-            bool ok = WriteToFile(pathToSave, fs => {
+            bool ok = AtomicFileWriter.WriteToFile(pathToSave, fs => {
                 // 全压缩（对象流 + 交叉引用流），对应原 .NET Framework 版的 writer.SetFullCompression()
                 var writerProperties = new WriterProperties().SetFullCompressionMode(true);
                 using var writer = new PdfWriter(fs, writerProperties);
@@ -573,7 +498,7 @@ namespace ImgsToPDF.Core {
             var comparer = new StringLenComparer();
             inFiles.Sort(comparer);
 
-            WriteToFile(outFile, stream => {
+            AtomicFileWriter.WriteToFile(outFile, stream => {
                 using var writer = new PdfWriter(stream);
                 using var outputPdf = new PdfDocument(writer);
                 foreach (var file in inFiles) {
@@ -594,7 +519,7 @@ namespace ImgsToPDF.Core {
 
             var folderOutlineCache = new Dictionary<string, PdfOutline>();
 
-            WriteToFile(outFile, stream => {
+            AtomicFileWriter.WriteToFile(outFile, stream => {
                 using var writer = new PdfWriter(stream);
                 using var outputPdf = new PdfDocument(writer);
                 int currentPage = 1;
@@ -742,7 +667,7 @@ namespace ImgsToPDF.Core {
             }
 
             // 3. 写文件：先按顺序拷贝页面（iText 9 的 GetPage 要求页面已存在），再按页码顺序构建书签树
-            WriteToFile(outFile, stream => {
+            AtomicFileWriter.WriteToFile(outFile, stream => {
                 using var writer = new PdfWriter(stream);
                 using var outputPdf = new PdfDocument(writer);
 

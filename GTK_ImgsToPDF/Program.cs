@@ -77,6 +77,13 @@ namespace GTK_ImgsToPDF {
         /// </summary>
         private int _previewRequestId;
 
+        /// <summary>
+        /// 拖放区光标：空闲时用手型（对应原版 PicInFolder.Cursor = SystemHandCursor），
+        /// 处理中换回默认箭头。Gdk 光标是原生资源，进程内共用一份，不做释放。
+        /// </summary>
+        private Gdk.Cursor? _handCursor;
+        private Gdk.Cursor? _arrowCursor;
+
         static ImgsToPDF() {
             NativeLibrary.SetDllImportResolver(typeof(SKImage).Assembly, ResolveSkiaSharpNativeLibrary);
         }
@@ -336,10 +343,58 @@ namespace GTK_ImgsToPDF {
                 }
             };
 
+            // 控件真正落到 GdkWindow 之后才能设置光标，构造阶段窗口还不存在
+            _dropTarget.Realized += (_, _) => {
+                _arrowCursor ??= CreateCursor("default", Gdk.CursorType.LeftPtr);
+                _handCursor ??= CreateCursor("pointer", Gdk.CursorType.Hand2);
+                UpdateDropTargetCursor();
+            };
+
             // 高亮样式只需注册一次；AddProviderForScreen 是静态方法，无需保留字段
             Gtk.StyleContext.AddProviderForScreen(Gdk.Screen.Default, CreateDropHighlightProvider(), Gtk.StyleProviderPriority.User);
 
             return _dropTarget;
+        }
+
+        /// <summary>
+        /// 按"是否忙碌"切换拖放区光标：空闲时手型（提示这一区域可点击选目录），
+        /// 处理中恢复默认箭头（此时点击无效，手型会误导用户）。
+        /// 对应原版在 UpdateControlStates 里设置 PicInFolder.Cursor 的做法。
+        /// </summary>
+        private void UpdateDropTargetCursor() {
+            Gdk.Window? window = _dropTarget?.Window;
+            if (window == null) {
+                return;   // 尚未 Realize，等 Realized 事件回调
+            }
+            Gdk.Cursor? cursor = _isProcessing ? _arrowCursor : _handCursor;
+            if (cursor != null) {
+                window.Cursor = cursor;
+            }
+        }
+
+        /// <summary>
+        /// 按主题名创建光标，主题里没有该名字时退回内置的光标类型；
+        /// 两者都失败返回 null（调用方保持原光标不变）。
+        /// </summary>
+        private static Gdk.Cursor? CreateCursor(string themeName, Gdk.CursorType fallbackType) {
+            Gdk.Display? display = Gdk.Display.Default;
+            if (display == null) {
+                return null;
+            }
+            try {
+                return new Gdk.Cursor(display, themeName);
+            }
+            catch {
+                try {
+                    // 内置类型是从 GTK2 沿用的旧接口，仅在主题名缺失时兜底
+#pragma warning disable CS0612
+                    return new Gdk.Cursor(fallbackType);
+#pragma warning restore CS0612
+                }
+                catch {
+                    return null;
+                }
+            }
         }
 
         /// <summary>
@@ -439,6 +494,8 @@ namespace GTK_ImgsToPDF {
                 _clearChosenItem.Sensitive = !isProcessing;
                 _configFileItem.Sensitive = !isProcessing;
                 _langItem.Sensitive = !isProcessing;
+
+                UpdateDropTargetCursor();
             }
             finally {
                 _isSyncingControlStates = false;
@@ -674,7 +731,7 @@ namespace GTK_ImgsToPDF {
             if (recursive && Directory.Exists(directoryPath)) {
                 // 递归收集子目录可能较慢（大量文件夹），放到后台执行，
                 // 否则含上千个子目录时点"开始"会让窗口出现"无响应"
-                var dirs = await Task.Run(() => RecursiveFolder(directoryPath));
+                var dirs = await Task.Run(() => FolderScanner.RecursiveFolder(directoryPath));
                 if (dirs.Count == 0) {
                     failureQueue.Enqueue(reportedTarget + Environment.NewLine + Strings.Hint_NoImagesFound);
                     return ([.. failureQueue], [.. warningQueue]);
@@ -750,92 +807,6 @@ namespace GTK_ImgsToPDF {
                 args.Add("--fast");
             }
             return [.. args];
-        }
-        /// <summary>
-        /// 检查指定文件夹中是否包含至少一张受支持的图片。
-        /// 使用 EnumerateFiles 惰性枚举，遇到第一张有效图片即返回 true，避免全量遍历。
-        /// </summary>
-        private static bool ContainsSupportedImage(string directoryPath) {
-            try {
-                return Directory.EnumerateFiles(directoryPath)
-                    .Any(f => ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(f)));
-            }
-            catch (Exception ex) {
-                Debug.WriteLine($"[ImgsToPDF] Failed to enumerate files in '{directoryPath}': {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// 递归遍历目录树，收集所有包含受支持图片的文件夹路径。
-        /// 具备以下防御与优化能力：
-        /// 1. 采用栈式迭代（DFS）代替方法递归，彻底规避极端目录层级下的栈溢出（StackOverflowException 不可捕获，会直接崩进程）；
-        /// 2. 检查并跳过重解析点（ReparsePoint，如 NTFS Junction、符号链接），同时维护规范化路径的已访问集合，杜绝死循环；
-        /// 3. 逐层捕获无权限/路径过长/IO 异常，遇到受限文件夹时跳过，避免整次扫描崩溃；
-        /// 4. 仅收集实际包含图片的文件夹，过滤空目录与纯子目录容器 ——
-        ///    否则每个空目录都会被拉起一个 Core 进程并生成一页空白 PDF。
-        /// </summary>
-        private static List<string> RecursiveFolder(string rootPath) {
-            var imageDirs = new List<string>();
-            if (string.IsNullOrWhiteSpace(rootPath)) {
-                return imageDirs;
-            }
-
-            DirectoryInfo rootDirInfo;
-            try {
-                rootDirInfo = new DirectoryInfo(System.IO.Path.GetFullPath(rootPath));
-                if (!rootDirInfo.Exists) {
-                    return imageDirs;
-                }
-            }
-            catch (Exception ex) {
-                Debug.WriteLine($"[ImgsToPDF] Invalid root path '{rootPath}': {ex.Message}");
-                return imageDirs;
-            }
-
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var stack = new Stack<DirectoryInfo>();
-            stack.Push(rootDirInfo);
-
-            while (stack.Count > 0) {
-                DirectoryInfo currentDir = stack.Pop();
-
-                // 统一去除末尾路径分隔符，防止 "C:\Dir\" 与 "C:\Dir" 在 HashSet 中被视为不同路径
-                string normalizedPath = currentDir.FullName.TrimEnd(
-                    System.IO.Path.DirectorySeparatorChar,
-                    System.IO.Path.AltDirectorySeparatorChar);
-
-                if (!visited.Add(normalizedPath)) {
-                    continue;
-                }
-
-                if (ContainsSupportedImage(currentDir.FullName)) {
-                    imageDirs.Add(currentDir.FullName);
-                }
-
-                try {
-                    foreach (DirectoryInfo childFolder in currentDir.EnumerateDirectories()) {
-                        try {
-                            // 跳过重解析点（符号链接、Junction 联接点等），防止死循环
-                            if ((childFolder.Attributes & FileAttributes.ReparsePoint) != 0) {
-                                Debug.WriteLine($"[ImgsToPDF] Skipped reparse point directory: '{childFolder.FullName}'");
-                                continue;
-                            }
-                            stack.Push(childFolder);
-                        }
-                        catch (Exception ex) {
-                            Debug.WriteLine($"[ImgsToPDF] Failed to inspect child directory '{childFolder.FullName}': {ex.Message}");
-                        }
-                    }
-                }
-                catch (Exception ex) {
-                    Debug.WriteLine($"[ImgsToPDF] Skipped inaccessible subdirectories of '{currentDir.FullName}': {ex.Message}");
-                }
-            }
-
-            // 排序只为让并发任务的启动顺序稳定；每个目录各出一份 PDF，顺序不影响产物内容
-            imageDirs.Sort(StringComparer.OrdinalIgnoreCase);
-            return imageDirs;
         }
         /// <summary>
         /// 在 UI 线程弹出密码输入框并等待用户输入或取消。
@@ -1045,7 +1016,7 @@ namespace GTK_ImgsToPDF {
 
                 // 混合拖入或单个容器：仍按第一项处理，但要明确告知其余项被忽略
                 string firstPath = paths[0];
-                if (Directory.Exists(firstPath) || ContainsSupportedImage(firstPath)) {
+                if (Directory.Exists(firstPath) || FolderScanner.ContainsSupportedImage(firstPath)) {
                     ChooseFileAction(firstPath);
                 }
                 else if (File.Exists(firstPath)) {
@@ -1273,8 +1244,9 @@ namespace GTK_ImgsToPDF {
                 return;
             }
 
-            // 这里的排序只决定预览用哪张图；最终页序由 Core 侧按 config.lua 的比较器重排
-            imageFiles.Sort(StringComparer.OrdinalIgnoreCase);
+            // 这里的排序只决定预览用哪张图；最终页序由 Core 侧按 config.lua 的比较器重排。
+            // 用自然排序与资源管理器一致：img2 在 img10 之前。
+            imageFiles.Sort(FolderScanner.NaturalPathComparer.Instance);
             SetSelection(SelectionState.FromImageFiles(imageFiles));
 
             int requestId = ++_previewRequestId;
@@ -1307,7 +1279,7 @@ namespace GTK_ImgsToPDF {
             }
 
             // 这里的排序只决定标签展示；最终合并顺序由 Core 侧按 config.lua 的比较器重排
-            pdfFiles.Sort(StringComparer.OrdinalIgnoreCase);
+            pdfFiles.Sort(FolderScanner.NaturalPathComparer.Instance);
             SetSelection(SelectionState.FromPdfFiles(pdfFiles));
 
             // 作废可能仍在后台运行的目录预览，避免它稍后覆盖 PDF 图标
@@ -1328,7 +1300,7 @@ namespace GTK_ImgsToPDF {
             try {
                 var candidates = Directory.EnumerateFiles(folderPath)
                     .Where(file => ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(file)))
-                    .OrderBy(file => file, StringComparer.Ordinal)
+                    .OrderBy(file => file, FolderScanner.NaturalPathComparer.Instance)
                     .ToList();
 
                 if (candidates.Count > 0) {

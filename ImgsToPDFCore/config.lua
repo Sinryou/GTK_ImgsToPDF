@@ -81,6 +81,9 @@ local Config = {}
 local pdfFileName
 local outputDir
 function Config.PathToSave()
+    -- 早退分支（非目录/非压缩包/清单解析失败）不会设置这两个变量，
+    -- 直接 table.concat 会抛 "invalid value (nil)"，Program 的结果校验只能看到一句无意义的报错
+    if not outputDir or not pdfFileName then return nil end
     return table.concat({ outputDir, "/", pdfFileName, ".pdf" })
 end
 
@@ -177,6 +180,31 @@ function Config:PreProcess(...)
         pdfFileName = pathUtil.dirName(path)
         outputDir = path
         PDFWrapper.ImagesToPDF(path, layout, fastFlag)
+        return
+    elseif commonUtils.IsManifestFile(path) then
+        -- GUI 的"选择图片组"/"选择PDF"模式：一组离散文件写进临时清单交给 Core。
+        -- 清单可能很长（上千项），用文件而不是命令行参数传，避免超过命令行长度上限。
+        local manifestData = commonUtils.ParseManifest(path)
+        if not manifestData or not manifestData.ImagePaths or manifestData.ImagePaths.Length == 0 then
+            commonUtils.ReportFailure("No valid file found in the manifest: " .. tostring(path))
+            return
+        end
+        outputDir = manifestData.OutputDir
+        pdfFileName = manifestData.PdfFileName
+
+        -- 清单首项是 PDF 时走多 PDF 合并（GUI 的"选择PDF"模式）；
+        -- 否则按图片顺序排版（GUI 的"选择图片组"模式）。
+        local firstItem = manifestData.ImagePaths[0] or manifestData.ImagePaths[1]
+        local ext = firstItem and pathUtil.getExtension(firstItem)
+        if ext and ext:lower() == ".pdf" then
+            PDFWrapper.PdfMerge(manifestData.ImagePaths, Config.PathToSave())
+            return
+        end
+
+        local pages = PDFWrapper.ImagesToPDFFromImageFiles(manifestData.ImagePaths, layout, fastFlag)
+        if pages == 0 and not commonUtils.FailureReported then
+            commonUtils.ReportFailure("Failed to write images to PDF: " .. tostring(path))
+        end
         return
     elseif not common.hasVal(compressSuffix, (pathUtil.getExtension(path) or ""):lower()) then
         -- 不以压缩格式结尾 不做动作；必须上报，否则上层会把"什么都没生成"当成生成成功

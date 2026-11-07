@@ -385,6 +385,26 @@ namespace ImgsToPDF.Core {
         }
 
         /// <summary>
+        /// 把指定的图片文件列表写入同一个 PDF，返回实际写入的页数。
+        /// 用于 GUI 的"选择图片组"模式：清单里的绝对路径已经是用户点选的结果，
+        /// 因此只做存在性过滤与排序，不再扫描目录。
+        /// 返回 0 表示没有任何有效图片——此时不创建输出文件，由 config.lua 上报失败。
+        /// </summary>
+        public static int ImagesToPDFFromImageFiles(string[] imageFiles, Layout layout = Layout.Single, bool fastFlag = false) {
+            CSGlobal.ThrowIfCancelled();
+            if (imageFiles == null || imageFiles.Length == 0) {
+                CommonUtils.ReportFailure("No image file was provided; no PDF was generated.");
+                return 0;
+            }
+            var validImages = imageFiles.Where(File.Exists).OrderBy(p => p, new StringLenComparer()).ToList();
+            if (validImages.Count == 0) {
+                CommonUtils.ReportFailure("No valid existing image file was found; no PDF was generated.");
+                return 0;
+            }
+            return WriteDocument(CSGlobal.luaConfig?.PathToSave(), layout, fastFlag, [validImages], blankPageWhenEmpty: false);
+        }
+
+        /// <summary>
         /// 写出一份 PDF 并返回写入的页数（失败返回 0）。
         /// folders 的每个元素是一个文件夹内已排好序的图片列表，按顺序逐页写入。
         /// </summary>
@@ -486,6 +506,14 @@ namespace ImgsToPDF.Core {
             if (ex.InnerException != null) {
                 Console.Error.WriteLine($"  Inner: {ex.InnerException.GetType().Name}: {ex.InnerException.Message}");
             }
+        }
+
+        /// <summary>
+        /// 合并PDF文件（兼容数组入参：Lua 侧传入的清单是 C# string[]）
+        /// </summary>
+        public static void PdfMerge(string[] inFiles, string outFile) {
+            // 显式指定 List<string>：集合表达式在 string[] 与 List<string> 两个重载间有二义性
+            PdfMerge(new List<string>(inFiles), outFile);
         }
 
         /// <summary>

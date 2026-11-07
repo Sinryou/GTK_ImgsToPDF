@@ -138,6 +138,33 @@
   <data name="Dialog_FolderTitle" xml:space="preserve">
     <value>Select folder containing images</value>
   </data>
+  <data name="Dialog_ImagesTitle" xml:space="preserve">
+    <value>Select images to combine into one PDF</value>
+  </data>
+  <data name="Dialog_PdfsTitle" xml:space="preserve">
+    <value>Select PDFs to merge into one PDF</value>
+  </data>
+  <data name="Filter_Images" xml:space="preserve">
+    <value>Image files</value>
+  </data>
+  <data name="Filter_Pdfs" xml:space="preserve">
+    <value>PDF files</value>
+  </data>
+  <data name="Hint_NoImagesFound" xml:space="preserve">
+    <value>No supported images were found in the selected folder or its subfolders.</value>
+  </data>
+  <data name="Menu_ChooseImages" xml:space="preserve">
+    <value>Choose Images(&amp;I)</value>
+  </data>
+  <data name="Menu_ChoosePdfs" xml:space="preserve">
+    <value>Choose PDFs(&amp;P)</value>
+  </data>
+  <data name="Path_SelectedImages" xml:space="preserve">
+    <value>[{0} Images] {1}</value>
+  </data>
+  <data name="Path_SelectedPdfs" xml:space="preserve">
+    <value>[{0} PDFs] {1}</value>
+  </data>
   <data name="Dialog_OK" xml:space="preserve">
     <value>OK</value>
   </data>

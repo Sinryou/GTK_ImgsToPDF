@@ -31,11 +31,25 @@ namespace GTK_ImgsToPDF {
         private ComboBoxText _layoutCombo = null!;
         private MenuItem _openFolderItem = null!;
         private MenuItem _openArchiveItem = null!;
+        private MenuItem _chooseImagesItem = null!;
+        private MenuItem _choosePdfsItem = null!;
         private MenuItem _clearChosenItem = null!;
         private MenuItem _configFileItem = null!;
         private MenuItem _langItem = null!;
         private bool _isProcessing;
-        private bool _hasValidSelection;
+
+        /// <summary>
+        /// 当前目标选择（模式 + 载荷，不可变、整体替换）。
+        /// 唯一转移入口是 <see cref="SetSelection"/>；所有模式判定只读
+        /// <see cref="SelectionState"/> 的谓词，不再从路径标签文本反推状态。
+        /// </summary>
+        private SelectionState _selection = SelectionState.Empty;
+
+        /// <summary>
+        /// UpdateControlStates 的重入保护：方法内部设置 Active 会触发 Toggled
+        /// 递归调用自身，用标志拦下重复推导
+        /// </summary>
+        private bool _isSyncingControlStates;
 
         /// <summary>
         /// 窗口是否已确认关闭，用于阻止关闭瞬间排队中的任务继续拉起新子进程
@@ -158,6 +172,14 @@ namespace GTK_ImgsToPDF {
             _openArchiveItem = new(Strings.Menu_OpenArchive) { UseUnderline = true };
             _openArchiveItem.Activated += (s, e) => SelectArchive();
             fileSub.Append(_openArchiveItem);
+
+            _chooseImagesItem = new(Strings.Menu_ChooseImages) { UseUnderline = true };
+            _chooseImagesItem.Activated += (s, e) => SelectImages();
+            fileSub.Append(_chooseImagesItem);
+
+            _choosePdfsItem = new(Strings.Menu_ChoosePdfs) { UseUnderline = true };
+            _choosePdfsItem.Activated += (s, e) => SelectPdfs();
+            fileSub.Append(_choosePdfsItem);
 
             _clearChosenItem = new(Strings.Menu_ClearSelection) { UseUnderline = true };
             _clearChosenItem.Activated += (s, e) => {
@@ -345,21 +367,82 @@ namespace GTK_ImgsToPDF {
             SetDropHighlight(false);
         }
 
+        /// <summary>
+        /// 全局设置界面忙碌/就绪状态，锁定用户输入以防止竞态条件。
+        /// 控件的可用状态由 <see cref="UpdateControlStates"/> 统一推导，此处不直接触碰控件。
+        /// </summary>
         private void SetUiState(bool isProcessing) {
             _isProcessing = isProcessing;
-            bool enabled = !isProcessing;
+            UpdateControlStates();
+        }
 
-            _startBtn.Sensitive = enabled && _hasValidSelection;
-            _layoutCombo.Sensitive = enabled;
-            _lossyCheck.Sensitive = enabled;
-            _recursiveCheck.Sensitive = enabled;
-            _mergeCheck.Sensitive = enabled && _recursiveCheck.Active;
+        /// <summary>
+        /// 目标选择的唯一转移入口：整体替换 <see cref="_selection"/> 并渲染由它派生的
+        /// 路径标签与悬停提示，最后经状态同步点刷新控件可用性。
+        /// 昂贵的派生（首图扫描、缩略图解码）仍由各动作方法自行完成，不在此处执行。
+        /// </summary>
+        private void SetSelection(SelectionState selection) {
+            _selection = selection ?? SelectionState.Empty;
 
-            _openFolderItem.Sensitive = enabled;
-            _openArchiveItem.Sensitive = enabled;
-            _clearChosenItem.Sensitive = enabled;
-            _configFileItem.Sensitive = enabled;
-            _langItem.Sensitive = enabled;
+            (string? text, string? toolTip) = _selection.Describe();
+            SetPathLabel(string.IsNullOrEmpty(text) ? Strings.Path_Waiting : text);
+            _pathLabel.TooltipText = string.IsNullOrEmpty(toolTip) ? Strings.Path_Waiting : toolTip;
+
+            UpdateControlStates();
+        }
+
+        /// <summary>
+        /// 全局唯一的控件状态同步点：从「选择模式 + 忙碌状态」推导全部控件的
+        /// Enabled，并维护三条不变量：
+        /// 1. 递归子目录与合并子PDF 仅对目录模式有意义，压缩包与合并模式下一律禁用并取消勾选；
+        /// 2. 合并子PDF 依赖递归子目录，后者取消勾选时前者随之取消；
+        /// 3. 版式与快速压缩对 PDF 合并无意义（合并只搬移页面，不重排版、不重编码）。
+        /// 任何改变上述状态的代码（选择目标、开始/结束处理、清除、用户勾选）完成后都必须调用
+        /// 本方法；禁止在调用方手工零散设置控件 Sensitive/Active，避免状态同步逻辑漂移。
+        /// </summary>
+        private void UpdateControlStates() {
+            if (_isSyncingControlStates) {
+                return;
+            }
+            _isSyncingControlStates = true;
+            try {
+                bool isProcessing = _isProcessing;
+                SelectionState selection = _selection;
+                bool isMergeMode = selection.IsImageMerge || selection.IsPdfMerge;
+
+                // 递归与合并子目录仅对路径模式下的真实文件夹生效；压缩包与两种合并模式一律禁用
+                // （压缩包由 Core 侧固定按「整体解压 + 递归生成单个 PDF」处理）。
+                // IsRealDirectory/IsArchiveFile 每次实时重判文件系统，目录被删后勾选随之收敛
+                bool supportsRecursion = !isMergeMode
+                    && (selection.Mode == SelectionMode.None || !selection.IsArchiveFile);
+
+                _recursiveCheck.Sensitive = !isProcessing && supportsRecursion;
+                if (!supportsRecursion) {
+                    _recursiveCheck.Active = false;
+                }
+
+                _mergeCheck.Sensitive = !isProcessing && supportsRecursion && _recursiveCheck.Active;
+                if (!supportsRecursion || !_recursiveCheck.Active) {
+                    _mergeCheck.Active = false;
+                }
+
+                _layoutCombo.Sensitive = !isProcessing && !selection.IsPdfMerge;
+                _lossyCheck.Sensitive = !isProcessing && !selection.IsPdfMerge;
+
+                // 无效路径时 IsStartable 为 false，开始按钮自然禁用，不会把无效路径传给 Core
+                _startBtn.Sensitive = !isProcessing && selection.IsStartable;
+
+                _openFolderItem.Sensitive = !isProcessing;
+                _openArchiveItem.Sensitive = !isProcessing;
+                _chooseImagesItem.Sensitive = !isProcessing;
+                _choosePdfsItem.Sensitive = !isProcessing;
+                _clearChosenItem.Sensitive = !isProcessing;
+                _configFileItem.Sensitive = !isProcessing;
+                _langItem.Sensitive = !isProcessing;
+            }
+            finally {
+                _isSyncingControlStates = false;
+            }
         }
 
         private Box CreateBottomControls() {
@@ -379,15 +462,8 @@ namespace GTK_ImgsToPDF {
                 Sensitive = false // 默认禁用状态
             };
             _recursiveCheck.Active = false; // 确保初始未勾选
-            // 3. 编写联动逻辑：当递归勾选状态改变时触发
-            _recursiveCheck.Toggled += (s, e) => {
-                // 只有当“递归子文件夹”被勾选时，“合并子PDF”才可用
-                _mergeCheck.Sensitive = !_isProcessing && _recursiveCheck.Active;
-                // 可选：如果取消勾选递归，自动也取消勾选合并（防止逻辑冲突）
-                if (!_recursiveCheck.Active) {
-                    _mergeCheck.Active = false;
-                }
-            };
+            // 联动逻辑统一在 UpdateControlStates 里推导，这里只把"用户动过"这件事通知过去
+            _recursiveCheck.Toggled += (s, e) => UpdateControlStates();
 
             // 4. 将它们添加到布局中
             Box checkBoxes = new(Orientation.Horizontal, spacing: 10) { Homogeneous = true };
@@ -421,14 +497,53 @@ namespace GTK_ImgsToPDF {
                     return;
                 }
 
-                // ① 先在主线程把控件状态取成局部变量。
+                // ① 先在主线程把选择与控件状态取成局部变量。
                 //    GTK 控件不是线程安全的，后台任务只能读这些快照，不能直接访问控件。
-                string directoryPath = _pathLabel.Text;
-                bool recursive = _recursiveCheck.Active;
-                bool fastMode = _lossyCheck.Active;
-                bool merge = _mergeCheck.Active;
+                SelectionState selection = _selection;
+                if (!selection.IsStartable) {
+                    return;
+                }
+
+                string? manifestPath = null;
+                string targetPathForCore;
+                string displayTargetPath;
+                bool recursive;
+                bool merge;
+                bool fastMode = !selection.IsPdfMerge && _lossyCheck.Active;
                 // 传枚举名而不是索引：界面顺序调整不会改变 Core 的解释
-                Layout layout = LayoutChoices[_layoutCombo.Active];
+                Layout layout = selection.IsPdfMerge ? Layout.Single : LayoutChoices[_layoutCombo.Active];
+
+                if (selection.IsImageMerge || selection.IsPdfMerge) {
+                    // 合并模式：把文件列表写成临时清单交给 Core，规避命令行长度上限。
+                    // 输出名沿用既有约定：图片合并 = 首个文件所在目录名.pdf；
+                    // PDF 合并 = 首个文件所在目录名_Merged.pdf。
+                    IReadOnlyList<string> files = selection.Files!;
+                    string firstFile = files[0];
+                    string outDir = System.IO.Path.GetDirectoryName(firstFile) ?? string.Empty;
+                    string baseName = System.IO.Path.GetFileName(outDir);
+                    if (string.IsNullOrEmpty(baseName)) {
+                        baseName = System.IO.Path.GetFileNameWithoutExtension(firstFile);
+                    }
+                    displayTargetPath = System.IO.Path.Combine(
+                        outDir, selection.IsPdfMerge ? $"{baseName}_Merged.pdf" : $"{baseName}.pdf");
+
+                    manifestPath = System.IO.Path.Combine(
+                        System.IO.Path.GetTempPath(), $"imgstopdf_{Guid.NewGuid():N}.txt");
+                    var lines = new List<string> { IpcContracts.ManifestOutputPrefix + displayTargetPath };
+                    lines.AddRange(files);
+                    File.WriteAllLines(manifestPath, lines,
+                        new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                    targetPathForCore = manifestPath;
+
+                    recursive = false;   // 合并模式不存在"递归子目录"的语义
+                    merge = false;
+                }
+                else {
+                    targetPathForCore = selection.TargetPath!;
+                    displayTargetPath = selection.TargetPath!;
+                    recursive = _recursiveCheck.Active;
+                    merge = _mergeCheck.Active;
+                }
 
                 _hintLabel.Text = Strings.Hint_Generating;
                 // 切换为可见状态并锁定控件
@@ -438,7 +553,7 @@ namespace GTK_ImgsToPDF {
 
                 try {
                     var (failures, warnings) = await Task.Run(() =>
-                        GeneratePdfs(directoryPath, recursive, fastMode, merge, layout));
+                        GeneratePdfs(targetPathForCore, recursive, fastMode, merge, layout, displayTargetPath));
                     if (_isClosing) return;
 
                     _progressBar.Fraction = 1.0;
@@ -477,6 +592,18 @@ namespace GTK_ImgsToPDF {
                     MsgBox.Show(this, ex.Message, MessageType.Error, Strings.Msg_ErrorTitle);
                 }
                 finally {
+                    // 临时清单只在本次任务生命周期内有效，无论成败都要删掉
+                    if (manifestPath != null) {
+                        try {
+                            if (File.Exists(manifestPath)) {
+                                File.Delete(manifestPath);
+                            }
+                        }
+                        catch (Exception ex) {
+                            Debug.WriteLine($"[ImgsToPDF] Failed to delete temp manifest '{manifestPath}': {ex.Message}");
+                        }
+                    }
+
                     if (!_isClosing) {
                         // 无论成功还是出错都恢复控件可用状态，避免界面卡死
                         SetUiState(false);
@@ -533,7 +660,7 @@ namespace GTK_ImgsToPDF {
         /// warnings = 退出码为 0 但 stderr 有内容（PDF 已生成，个别图片被跳过）。
         /// </returns>
         private async Task<(List<string> failures, List<string> warnings)> GeneratePdfs(
-                string directoryPath, bool recursive, bool fastMode, bool merge, Layout layout) {
+                string directoryPath, bool recursive, bool fastMode, bool merge, Layout layout, string displayTargetPath) {
             // 根据平台动态决定文件名
             string coreName = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
                               ? "ImgsToPDFCore.exe"
@@ -541,11 +668,17 @@ namespace GTK_ImgsToPDF {
             string fileName = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Core", coreName);
             var failureQueue = new ConcurrentQueue<string>();
             var warningQueue = new ConcurrentQueue<string>();
+            // 报错时展示用户能认出的路径：清单模式下传入的是临时 txt，不能让用户看到那个
+            string reportedTarget = string.IsNullOrEmpty(displayTargetPath) ? directoryPath : displayTargetPath;
 
             if (recursive && Directory.Exists(directoryPath)) {
                 // 递归收集子目录可能较慢（大量文件夹），放到后台执行，
                 // 否则含上千个子目录时点"开始"会让窗口出现"无响应"
-                var dirs = await Task.Run(() => RecursiveFolder(directoryPath, []));
+                var dirs = await Task.Run(() => RecursiveFolder(directoryPath));
+                if (dirs.Count == 0) {
+                    failureQueue.Enqueue(reportedTarget + Environment.NewLine + Strings.Hint_NoImagesFound);
+                    return ([.. failureQueue], [.. warningQueue]);
+                }
 
                 // 并发 Core 进程数由任务量、CPU 线程数与可用内存综合决定：
                 // - 任务很少时按任务数并发，避免白白拉起多余的完整 .NET 进程；
@@ -577,7 +710,7 @@ namespace GTK_ImgsToPDF {
             }
             else if (!_isClosing) {
                 var (_, stderr, exitCode) = await RunProcessAsync(fileName, BuildCoreArgs(directoryPath, fastMode, layout), PromptPasswordOnUiAsync);
-                CollectProcessResult(directoryPath, stderr, exitCode, failureQueue, warningQueue);
+                CollectProcessResult(reportedTarget, stderr, exitCode, failureQueue, warningQueue);
             }
 
             return ([.. failureQueue], [.. warningQueue]);
@@ -618,13 +751,91 @@ namespace GTK_ImgsToPDF {
             }
             return [.. args];
         }
-        static List<string> RecursiveFolder(string path, List<string> dirs) {
-            dirs.Add(path);
-            var TheFolder = new DirectoryInfo(path);
-            foreach (var childFolder in TheFolder.GetDirectories()) {
-                RecursiveFolder(childFolder.FullName, dirs);
+        /// <summary>
+        /// 检查指定文件夹中是否包含至少一张受支持的图片。
+        /// 使用 EnumerateFiles 惰性枚举，遇到第一张有效图片即返回 true，避免全量遍历。
+        /// </summary>
+        private static bool ContainsSupportedImage(string directoryPath) {
+            try {
+                return Directory.EnumerateFiles(directoryPath)
+                    .Any(f => ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(f)));
             }
-            return dirs;
+            catch (Exception ex) {
+                Debug.WriteLine($"[ImgsToPDF] Failed to enumerate files in '{directoryPath}': {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 递归遍历目录树，收集所有包含受支持图片的文件夹路径。
+        /// 具备以下防御与优化能力：
+        /// 1. 采用栈式迭代（DFS）代替方法递归，彻底规避极端目录层级下的栈溢出（StackOverflowException 不可捕获，会直接崩进程）；
+        /// 2. 检查并跳过重解析点（ReparsePoint，如 NTFS Junction、符号链接），同时维护规范化路径的已访问集合，杜绝死循环；
+        /// 3. 逐层捕获无权限/路径过长/IO 异常，遇到受限文件夹时跳过，避免整次扫描崩溃；
+        /// 4. 仅收集实际包含图片的文件夹，过滤空目录与纯子目录容器 ——
+        ///    否则每个空目录都会被拉起一个 Core 进程并生成一页空白 PDF。
+        /// </summary>
+        private static List<string> RecursiveFolder(string rootPath) {
+            var imageDirs = new List<string>();
+            if (string.IsNullOrWhiteSpace(rootPath)) {
+                return imageDirs;
+            }
+
+            DirectoryInfo rootDirInfo;
+            try {
+                rootDirInfo = new DirectoryInfo(System.IO.Path.GetFullPath(rootPath));
+                if (!rootDirInfo.Exists) {
+                    return imageDirs;
+                }
+            }
+            catch (Exception ex) {
+                Debug.WriteLine($"[ImgsToPDF] Invalid root path '{rootPath}': {ex.Message}");
+                return imageDirs;
+            }
+
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var stack = new Stack<DirectoryInfo>();
+            stack.Push(rootDirInfo);
+
+            while (stack.Count > 0) {
+                DirectoryInfo currentDir = stack.Pop();
+
+                // 统一去除末尾路径分隔符，防止 "C:\Dir\" 与 "C:\Dir" 在 HashSet 中被视为不同路径
+                string normalizedPath = currentDir.FullName.TrimEnd(
+                    System.IO.Path.DirectorySeparatorChar,
+                    System.IO.Path.AltDirectorySeparatorChar);
+
+                if (!visited.Add(normalizedPath)) {
+                    continue;
+                }
+
+                if (ContainsSupportedImage(currentDir.FullName)) {
+                    imageDirs.Add(currentDir.FullName);
+                }
+
+                try {
+                    foreach (DirectoryInfo childFolder in currentDir.EnumerateDirectories()) {
+                        try {
+                            // 跳过重解析点（符号链接、Junction 联接点等），防止死循环
+                            if ((childFolder.Attributes & FileAttributes.ReparsePoint) != 0) {
+                                Debug.WriteLine($"[ImgsToPDF] Skipped reparse point directory: '{childFolder.FullName}'");
+                                continue;
+                            }
+                            stack.Push(childFolder);
+                        }
+                        catch (Exception ex) {
+                            Debug.WriteLine($"[ImgsToPDF] Failed to inspect child directory '{childFolder.FullName}': {ex.Message}");
+                        }
+                    }
+                }
+                catch (Exception ex) {
+                    Debug.WriteLine($"[ImgsToPDF] Skipped inaccessible subdirectories of '{currentDir.FullName}': {ex.Message}");
+                }
+            }
+
+            // 排序只为让并发任务的启动顺序稳定；每个目录各出一份 PDF，顺序不影响产物内容
+            imageDirs.Sort(StringComparer.OrdinalIgnoreCase);
+            return imageDirs;
         }
         /// <summary>
         /// 在 UI 线程弹出密码输入框并等待用户输入或取消。
@@ -800,36 +1011,61 @@ namespace GTK_ImgsToPDF {
 
                 // 用 TryCreate 而不是构造函数：从浏览器拖入选中的文本、或拖入
                 // 虚拟文件时，uri-list 里可能不是合法 URI，构造函数会抛 UriFormatException
-                if (!Uri.TryCreate(uris[0], UriKind.Absolute, out Uri? fileUri) || !fileUri.IsFile) {
+                var paths = new List<string>(uris.Length);
+                foreach (string uri in uris) {
+                    if (Uri.TryCreate(uri, UriKind.Absolute, out Uri? fileUri) && fileUri.IsFile) {
+                        paths.Add(fileUri.LocalPath);
+                    }
+                }
+                if (paths.Count == 0) {
                     NotifyInvalidDrop(Strings.Msg_InvalidPath);
                     args.RetVal = true;
                     return;
                 }
 
-                string folderPath = fileUri.LocalPath;
+                // 按内容类型分流：纯图片组、纯 PDF 组各走合并模式，其余按容器（目录/压缩包）处理
+                var imageFiles = paths
+                    .Where(f => File.Exists(f) && ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(f)))
+                    .ToList();
+                var pdfFiles = paths
+                    .Where(f => File.Exists(f) && string.Equals(System.IO.Path.GetExtension(f), ".pdf", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var containers = paths
+                    .Where(f => Directory.Exists(f) || ImageContracts.ArchiveExtensions.Contains(System.IO.Path.GetExtension(f)))
+                    .ToList();
 
-                // 检查拖入的是否为文件夹
-                if (Directory.Exists(folderPath)) {
-                    ProcessFolder(folderPath);
+                if (pdfFiles.Count > 0 && imageFiles.Count == 0 && containers.Count == 0) {
+                    ChoosePdfsAction(pdfFiles);
+                    return;
                 }
-                else if (File.Exists(folderPath)) {
-                    string extension = System.IO.Path.GetExtension(folderPath);
-                    if (ImageContracts.ArchiveExtensions.Contains(extension)) {
-                        ProcessArchive(folderPath);
+                if (imageFiles.Count > 0 && containers.Count == 0) {
+                    ChooseImagesAction(imageFiles);
+                    return;
+                }
+
+                // 混合拖入或单个容器：仍按第一项处理，但要明确告知其余项被忽略
+                string firstPath = paths[0];
+                if (Directory.Exists(firstPath) || ContainsSupportedImage(firstPath)) {
+                    ChooseFileAction(firstPath);
+                }
+                else if (File.Exists(firstPath)) {
+                    if (ImageContracts.ArchiveExtensions.Contains(System.IO.Path.GetExtension(firstPath))) {
+                        ChooseFileAction(firstPath);
                     }
                     else {
-                        // 原实现只写 Console.WriteLine，而 Windows 下 OutputType 是 WinExe（没有控制台），
-                        // 用户完全看不到任何反馈
                         NotifyInvalidDrop(Strings.Drop_NotSupported);
+                        args.RetVal = true;
+                        return;
                     }
                 }
                 else {
                     NotifyInvalidDrop(Strings.Drop_NotExist);
+                    args.RetVal = true;
+                    return;
                 }
 
-                // 与原版一致只处理第一个拖入项，但要明确告知，避免用户以为全部都处理了
-                if (uris.Length > 1) {
-                    _hintLabel.Text = string.Format(Strings.Msg_MultipleDropped, uris.Length - 1);
+                if (paths.Count > 1) {
+                    _hintLabel.Text = string.Format(Strings.Msg_MultipleDropped, paths.Count - 1);
                 }
             }
             catch (Exception ex) {
@@ -847,7 +1083,6 @@ namespace GTK_ImgsToPDF {
         private void NotifyInvalidDrop(string message) {
             // ResetToInitialState 会把提示改回蓝色初始文案，所以顺序不能颠倒
             ResetToInitialState();
-            SetPathLabel(Strings.Path_Waiting);
             SetLabelColor(_hintLabel, 200, 0, 0);
             _hintLabel.Text = message;
             MsgBox.Show(this, message, MessageType.Warning, Strings.Msg_ErrorTitle);
@@ -884,8 +1119,69 @@ namespace GTK_ImgsToPDF {
 
             // 检查拖入的是否为文件夹
             if (Directory.Exists(selectedPath)) {
-                ProcessFolder(selectedPath);
+                ChooseFileAction(selectedPath);
             }
+        }
+
+        /// <summary>
+        /// 选择多个离散图片文件，合并输出为一个 PDF（进入图片合并模式）。
+        /// 输出位置与拖入多张图片时一致：首张图片所在目录下的「目录名.pdf」。
+        /// </summary>
+        private void SelectImages() {
+            if (_isProcessing) {
+                return;
+            }
+            List<string>? files = PickFiles(
+                Strings.Dialog_ImagesTitle, Strings.Filter_Images, ImageContracts.ImageExtensions);
+            if (files == null || files.Count == 0) {
+                return;
+            }
+            ChooseImagesAction(files);
+        }
+
+        /// <summary>
+        /// 选择多个 PDF 文件，按文件名顺序合并为一个 PDF（进入 PDF 合并模式）。
+        /// 输出位置与拖入多个 PDF 时一致：首个 PDF 所在目录下的「目录名_Merged.pdf」。
+        /// </summary>
+        private void SelectPdfs() {
+            if (_isProcessing) {
+                return;
+            }
+            List<string>? files = PickFiles(
+                Strings.Dialog_PdfsTitle, Strings.Filter_Pdfs, [".pdf"]);
+            if (files == null || files.Count == 0) {
+                return;
+            }
+            ChoosePdfsAction(files);
+        }
+
+        /// <summary>
+        /// 弹出多选文件对话框并返回用户选中的文件列表；用户取消时返回 null。
+        /// 筛选器用的扩展名由调用方传入（图片侧来自 <see cref="ImageContracts"/>），
+        /// 避免对话框允许选择的类型与 Core 实际支持的类型各自维护、逐渐漂移。
+        /// </summary>
+        private List<string>? PickFiles(string title, string filterName, IEnumerable<string> extensions) {
+            using var dialog = new FileChooserDialog(
+                title,
+                this,
+                FileChooserAction.Open,
+                Strings.Dialog_Cancel, ResponseType.Cancel,
+                Strings.Dialog_OK, ResponseType.Accept) {
+                SelectMultiple = true   // 合并模式的前提就是一次选中多个文件
+            };
+            dialog.SetDefaultSize(800, 600);
+
+            // 排序只是为了让筛选器里的通配符顺序稳定，与文件本身的排序无关
+            var filter = new FileFilter { Name = filterName };
+            foreach (string ext in extensions.OrderBy(e => e, StringComparer.OrdinalIgnoreCase)) {
+                filter.AddPattern("*" + ext);
+            }
+            dialog.AddFilter(filter);
+
+            if (dialog.Run() != (int)ResponseType.Accept) {
+                return null;
+            }
+            return [.. dialog.Filenames];
         }
 
         private void SelectArchive() {
@@ -932,7 +1228,7 @@ namespace GTK_ImgsToPDF {
             if (File.Exists(selectedPath)) {
                 string extension = System.IO.Path.GetExtension(selectedPath);
                 if (ImageContracts.ArchiveExtensions.Contains(extension)) {
-                    ProcessArchive(selectedPath);
+                    ChooseFileAction(selectedPath);
                 }
                 else {
                     // "所有文件"过滤器让用户很容易选到非压缩包；不能静默什么都不做，
@@ -945,17 +1241,91 @@ namespace GTK_ImgsToPDF {
             }
         }
 
-        // 处理文件夹：识别图片并更新 UI
-        private async void ProcessFolder(string folderPath) {
-            SetPathLabel(folderPath);
+        /// <summary>
+        /// 选中一个目录或压缩包路径（点击预览区、打开文件夹/压缩包菜单与拖放兜底的共用实现）。
+        /// 路径是否有效由 SelectionState 读取时判定，这里只按分类准备预览图，
+        /// 标签与控件可用性交给 SetSelection 统一渲染。
+        /// </summary>
+        private void ChooseFileAction(string path) {
+            var selection = SelectionState.FromPath(path);
+            SetSelection(selection);
 
+            if (selection.IsRealDirectory) {
+                _ = UpdateFolderPreviewAsync(path);
+            }
+            else if (selection.IsArchiveFile) {
+                ShowArchivePreview();
+                SetLabelColor(_hintLabel, 138, 43, 226);
+                _hintLabel.Text = Strings.Hint_Ready;
+            }
+            else {
+                ShowNoPhotoPreview();
+                SetLabelColor(_hintLabel, 200, 0, 0);
+                _hintLabel.Text = Strings.Hint_NoImagesAtAll;
+            }
+        }
+
+        /// <summary>
+        /// 选中一组离散图片文件，进入“多图合并为一个 PDF”模式。
+        /// </summary>
+        private async void ChooseImagesAction(List<string> imageFiles) {
+            if (imageFiles == null || imageFiles.Count == 0) {
+                return;
+            }
+
+            // 这里的排序只决定预览用哪张图；最终页序由 Core 侧按 config.lua 的比较器重排
+            imageFiles.Sort(StringComparer.OrdinalIgnoreCase);
+            SetSelection(SelectionState.FromImageFiles(imageFiles));
+
+            int requestId = ++_previewRequestId;
+            var preview = await Task.Run(() => LoadFirstUsablePreview(imageFiles, 420, 420));
+            if (requestId != _previewRequestId) {
+                preview?.Dispose();
+                return;
+            }
+
+            if (preview != null) {
+                var oldPreview = _mainImage.Pixbuf;
+                _mainImage.Pixbuf = preview;
+                oldPreview?.Dispose();
+            }
+            else {
+                ShowNoPhotoPreview();
+            }
+            _smallFolderIcon.Hide();
+
+            SetLabelColor(_hintLabel, 138, 43, 226);
+            _hintLabel.Text = Strings.Hint_Ready;
+        }
+
+        /// <summary>
+        /// 选中一组离散 PDF 文件，进入“多 PDF 合并为一个 PDF”模式。
+        /// </summary>
+        private void ChoosePdfsAction(List<string> pdfFiles) {
+            if (pdfFiles == null || pdfFiles.Count == 0) {
+                return;
+            }
+
+            // 这里的排序只决定标签展示；最终合并顺序由 Core 侧按 config.lua 的比较器重排
+            pdfFiles.Sort(StringComparer.OrdinalIgnoreCase);
+            SetSelection(SelectionState.FromPdfFiles(pdfFiles));
+
+            // 作废可能仍在后台运行的目录预览，避免它稍后覆盖 PDF 图标
+            _previewRequestId++;
+            ShowIconPreview("x-office-document");
+            _smallFolderIcon.Hide();
+
+            SetLabelColor(_hintLabel, 138, 43, 226);
+            _hintLabel.Text = Strings.Hint_Ready;
+        }
+
+        /// <summary>
+        /// 目录预览：本层有图片就取首张可用图做缩略图；没有则给出“改用递归”或“这里没图片”的提示。
+        /// 只要目录存在就允许开始 —— 递归模式的主要用法正是“选中只有子目录的父目录”，
+        /// 由 Core 逐个处理子目录。
+        /// </summary>
+        private async Task UpdateFolderPreviewAsync(string folderPath) {
             try {
-                // 关键：只要目录存在就允许开始，不要求本层必须有图片。
-                // 递归模式的主要用法正是"选中只有子目录的父目录"，
-                // 由 Core 进程逐个处理子目录（对应原版 ImgsToPDF.cs 对任何存在的目录都启用按钮）。
-                _hasValidSelection = true;
-                _startBtn.Sensitive = !_isProcessing;
-
                 var candidates = Directory.EnumerateFiles(folderPath)
                     .Where(file => ImageContracts.ImageExtensions.Contains(System.IO.Path.GetExtension(file)))
                     .OrderBy(file => file, StringComparer.Ordinal)
@@ -978,9 +1348,7 @@ namespace GTK_ImgsToPDF {
                         oldPreview?.Dispose();
                     }
                     else {
-                        var oldGen = _mainImage.Pixbuf;
-                        _mainImage.SetFromIconName("image-x-generic", IconSize.Dialog);
-                        oldGen?.Dispose();
+                        ShowIconPreview("image-x-generic");
                     }
 
                     SetLabelColor(_hintLabel, 138, 43, 226);
@@ -988,16 +1356,12 @@ namespace GTK_ImgsToPDF {
                     _smallFolderIcon.Show();
                 }
                 else {
-                    // 本层没有直属图片。不要再调 ResetToInitialState()：
-                    // 那会把刚刚启用的开始按钮又关掉，导致递归功能彻底不可达。
-                    var oldIcon = _mainImage.Pixbuf;
-                    _mainImage.SetFromIconName("folder", IconSize.Dialog);
-                    oldIcon?.Dispose();
+                    ShowIconPreview("folder");
                     _smallFolderIcon.Hide();
 
                     bool hasSubDirs = Directory.EnumerateDirectories(folderPath).Any();
                     if (hasSubDirs) {
-                        // 有子目录：引导用户改用递归，而不是断言"这里没东西"
+                        // 有子目录：引导用户改用递归，而不是断言“这里没东西”
                         SetLabelColor(_hintLabel, 138, 43, 226);
                         _hintLabel.Text = Strings.Hint_NoImagesUseRecursive;
                     }
@@ -1010,8 +1374,30 @@ namespace GTK_ImgsToPDF {
             catch (Exception ex) {
                 MsgBox.Show(this, $"{Strings.Msg_ErrProcess}{ex.Message}");
                 ResetToInitialState();
-                SetPathLabel(Strings.Path_Waiting);
             }
+        }
+
+        /// <summary>压缩包预览：固定显示归档图标，不叠加角标。</summary>
+        private void ShowArchivePreview() {
+            _previewRequestId++;   // 作废可能仍在后台运行的目录预览
+            ShowIconPreview("package-x-generic");
+            _smallFolderIcon.Hide();
+        }
+
+        private void ShowNoPhotoPreview() {
+            _previewRequestId++;
+            ShowIconPreview("image-missing");
+            _smallFolderIcon.Hide();
+        }
+
+        /// <summary>
+        /// 用主题图标替换预览图。必须显式释放旧 Pixbuf：
+        /// Gdk# 的 Pixbuf 是引用计数的原生资源，换图不释放会随选择次数累积。
+        /// </summary>
+        private void ShowIconPreview(string iconName) {
+            var oldIcon = _mainImage.Pixbuf;
+            _mainImage.SetFromIconName(iconName, IconSize.Dialog);
+            oldIcon?.Dispose();
         }
 
         /// <summary>
@@ -1038,42 +1424,16 @@ namespace GTK_ImgsToPDF {
             _pathLabel.TooltipText = text;
         }
 
-        // 处理压缩包：更新 UI 状态
-        private void ProcessArchive(string archivePath) {
-            SetPathLabel(archivePath);
-            _hasValidSelection = true;
-            _startBtn.Sensitive = !_isProcessing;
-
-            // 作废可能仍在后台运行的目录预览，避免它稍后覆盖压缩包图标
-            _previewRequestId++;
-
-            // 释放旧的预览图
-            var oldArchiveIcon = _mainImage.Pixbuf;
-            // 显示归档图标
-            _mainImage.SetFromIconName("package-x-generic", IconSize.Dialog);
-            oldArchiveIcon?.Dispose();
-
-            SetLabelColor(_hintLabel, 138, 43, 226); // 紫色
-            _hintLabel.Text = Strings.Hint_Ready;
-
-            // 压缩包不显示文件夹叠加图标
-            _smallFolderIcon.Hide();
-        }
-
         /// <summary>
         /// 回到"未选择任何内容"的初始状态。
-        /// 注意：只有"清除选择"与错误回退才应调用它 —— ProcessFolder 在本层找不到
-        /// 图片时不能调用，否则会把刚启用的开始按钮又关掉，使递归功能不可达。
+        /// 注意：只有"清除选择"与错误回退才应调用它 —— 选中目录但本层没有图片时不能调用，
+        /// 否则会把刚启用的开始按钮又关掉，使递归功能不可达。
         /// </summary>
         private void ResetToInitialState() {
-            // 作废可能仍在后台运行的预览加载
-            _previewRequestId++;
-            _hasValidSelection = false;
+            // 先切状态：SetSelection 会同步刷新路径标签，并让开始按钮按 IsStartable 收敛
+            SetSelection(SelectionState.Empty);
 
-            // 释放旧的预览图再重置
-            var oldResetIcon = _mainImage.Pixbuf;
-            _mainImage.SetFromIconName("folder", IconSize.Dialog);
-            oldResetIcon?.Dispose();
+            ShowIconPreview("folder");
 
             SetLabelColor(_hintLabel, 0, 0, 255); // 蓝色
             _hintLabel.Text = Strings.Hint_Initial;
@@ -1083,9 +1443,6 @@ namespace GTK_ImgsToPDF {
                 _progressBar.Hide();
                 _progressBar.Fraction = 0.0;
             }
-
-            // 重置 startBtn 状态（安全检查）
-            _startBtn.Sensitive = false;
         }
 
         // 在“关于”菜单项的 Activated 事件中调用

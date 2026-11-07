@@ -122,6 +122,15 @@ namespace GTK_ImgsToPDF.Localization {
                 return ResourceManager.GetString("Dialog_FolderTitle", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   查找类似 Select images to combine into one PDF 的本地化字符串。
+        /// </summary>
+        internal static string Dialog_ImagesTitle {
+            get {
+                return ResourceManager.GetString("Dialog_ImagesTitle", resourceCulture);
+            }
+        }
         
         /// <summary>
         ///   查找类似 OK 的本地化字符串。
@@ -147,6 +156,15 @@ namespace GTK_ImgsToPDF.Localization {
         internal static string Dialog_PasswordTitle {
             get {
                 return ResourceManager.GetString("Dialog_PasswordTitle", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 Select PDFs to merge into one PDF 的本地化字符串。
+        /// </summary>
+        internal static string Dialog_PdfsTitle {
+            get {
+                return ResourceManager.GetString("Dialog_PdfsTitle", resourceCulture);
             }
         }
 
@@ -192,6 +210,24 @@ namespace GTK_ImgsToPDF.Localization {
         internal static string Filter_Archive {
             get {
                 return ResourceManager.GetString("Filter_Archive", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 Image files 的本地化字符串。
+        /// </summary>
+        internal static string Filter_Images {
+            get {
+                return ResourceManager.GetString("Filter_Images", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 PDF files 的本地化字符串。
+        /// </summary>
+        internal static string Filter_Pdfs {
+            get {
+                return ResourceManager.GetString("Filter_Pdfs", resourceCulture);
             }
         }
         
@@ -291,6 +327,24 @@ namespace GTK_ImgsToPDF.Localization {
         internal static string Menu_About {
             get {
                 return ResourceManager.GetString("Menu_About", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 Choose Images(&amp;I) 的本地化字符串。
+        /// </summary>
+        internal static string Menu_ChooseImages {
+            get {
+                return ResourceManager.GetString("Menu_ChooseImages", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 Choose PDFs(&amp;P) 的本地化字符串。
+        /// </summary>
+        internal static string Menu_ChoosePdfs {
+            get {
+                return ResourceManager.GetString("Menu_ChoosePdfs", resourceCulture);
             }
         }
         
@@ -410,6 +464,24 @@ namespace GTK_ImgsToPDF.Localization {
                 return ResourceManager.GetString("Path_Waiting", resourceCulture);
             }
         }
+
+        /// <summary>
+        ///   查找类似 [{0} Images] {1} 的本地化字符串。
+        /// </summary>
+        internal static string Path_SelectedImages {
+            get {
+                return ResourceManager.GetString("Path_SelectedImages", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 [{0} PDFs] {1} 的本地化字符串。
+        /// </summary>
+        internal static string Path_SelectedPdfs {
+            get {
+                return ResourceManager.GetString("Path_SelectedPdfs", resourceCulture);
+            }
+        }
         
         /// <summary>
         ///   查找类似 PDF generated, but {0} item(s) reported problems 的本地化字符串。
@@ -426,6 +498,15 @@ namespace GTK_ImgsToPDF.Localization {
         internal static string Hint_NoImagesAtAll {
             get {
                 return ResourceManager.GetString("Hint_NoImagesAtAll", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   查找类似 No supported images were found in the selected folder or its subfolders. 的本地化字符串。
+        /// </summary>
+        internal static string Hint_NoImagesFound {
+            get {
+                return ResourceManager.GetString("Hint_NoImagesFound", resourceCulture);
             }
         }
         

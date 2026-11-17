@@ -77,11 +77,12 @@ jobs:
       - name: Package Windows 7z
         shell: pwsh
         run: |
-          $publishDir = "GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish"
-          $archive = "GTK_ImgsToPDF-windows-x64.7z"
+          # 必须传绝对路径（或带 .\ 前缀的相对路径）：7-Zip 对不带 .\ 的相对通配符会保留完整
+          # 相对路径，解压后会多出 GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish 这几层目录。
+          $publishDir = Join-Path $PWD "GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish"
+          $archive = Join-Path $PWD "GTK_ImgsToPDF-windows-x64.7z"
 
           # LZMA2 固实压缩：相比 zip(deflate) 能显著减小 .NET 单文件与 GTK3 运行时的体积。
-          # 归档内的路径结构与原先的 zip 保持一致（文件位于归档根目录）。
           7z a -t7z -m0=lzma2 -mx=9 -md=256m -mfb=273 -ms=on -mmt=on $archive "$publishDir\*"
           if ($LASTEXITCODE -ne 0) { throw "7z 打包失败，退出码 $LASTEXITCODE" }
 
@@ -89,7 +90,21 @@ jobs:
           7z t $archive | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "打包验证失败：$archive 完整性校验未通过" }
 
-          Write-Host ("压缩包体积: {0:N1} MB" -f ((Get-Item $archive).Length / 1MB))
+          # 结构校验：归档根层必须直接是发布内容，不允许残留 publish 父级路径。
+          $entries = @((& 7z l -slt $archive) |
+              Where-Object { $_ -like 'Path = *' } |
+              ForEach-Object { $_.Substring(7) } |
+              Select-Object -Skip 1)   # 首条是归档自身路径
+          $leaked = @($entries | Where-Object { $_ -like 'publish\*' -or $_ -like 'GTK_ImgsToPDF\bin\*' })
+          if ($leaked.Count -gt 0) {
+              throw "归档结构错误：根层残留父级路径，例如 $($leaked[0])"
+          }
+          if ($entries -notcontains 'GTK_ImgsToPDF.exe') {
+              throw "归档结构错误：根层缺少 GTK_ImgsToPDF.exe"
+          }
+
+          $rootItems = @($entries | Where-Object { $_ -notmatch '\\' })
+          Write-Host ("压缩包体积: {0:N1} MB，根层: {1}" -f ((Get-Item $archive).Length / 1MB), ($rootItems -join ', '))
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
@@ -135,9 +150,13 @@ jobs:
           # 不使用 .7z：p7zip 不保存 Unix 权限位，解压后可执行文件会丢失 +x。
           tar -cf - -C "$publish_dir" . | xz -9e -T0 -c > "$archive"
 
-          # 校验：非空 + 归档可读
+          # 校验：非空 + 可读 + 根层直接是发布内容（-C 保证不残留 publish 父级路径）
           test -s "$archive"
-          tar -tJf "$archive" > /dev/null
+          entries=$(tar -tJf "$archive")
+          if ! printf '%s\n' "$entries" | grep -qx './GTK_ImgsToPDF'; then
+            echo "归档结构错误：根层缺少 ./GTK_ImgsToPDF"
+            exit 1
+          fi
           ls -lh "$archive"
 
       - name: Upload Linux Artifact

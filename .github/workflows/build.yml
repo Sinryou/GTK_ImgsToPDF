@@ -74,16 +74,28 @@ jobs:
           }
           Write-Host "Windows 应用及 GTK3 运行时已成功发布。"
 
-      - name: Package Windows Zip
+      - name: Package Windows 7z
         shell: pwsh
         run: |
-          7z a -tzip GTK_ImgsToPDF-windows-x64.zip .\GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish\*
+          $publishDir = "GTK_ImgsToPDF\bin\Release\net10.0\win-x64\publish"
+          $archive = "GTK_ImgsToPDF-windows-x64.7z"
+
+          # LZMA2 固实压缩：相比 zip(deflate) 能显著减小 .NET 单文件与 GTK3 运行时的体积。
+          # 归档内的路径结构与原先的 zip 保持一致（文件位于归档根目录）。
+          7z a -t7z -m0=lzma2 -mx=9 -md=256m -mfb=273 -ms=on -mmt=on $archive "$publishDir\*"
+          if ($LASTEXITCODE -ne 0) { throw "7z 打包失败，退出码 $LASTEXITCODE" }
+
+          if (!(Test-Path $archive)) { throw "打包验证失败：未生成 $archive" }
+          7z t $archive | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "打包验证失败：$archive 完整性校验未通过" }
+
+          Write-Host ("压缩包体积: {0:N1} MB" -f ((Get-Item $archive).Length / 1MB))
 
       - name: Upload Windows Artifact
         uses: actions/upload-artifact@v4
         with:
           name: GTK_ImgsToPDF-windows-x64
-          path: GTK_ImgsToPDF-windows-x64.zip
+          path: GTK_ImgsToPDF-windows-x64.7z
           if-no-files-found: error
 
   build-linux:
@@ -113,15 +125,26 @@ jobs:
               exit 1
           fi
 
-      - name: Package Linux tar.gz
+      - name: Package Linux tar.xz
         run: |
-          tar -czvf GTK_ImgsToPDF-linux-x64.tar.gz -C GTK_ImgsToPDF/bin/Release/net10.0/linux-x64/publish .
+          set -o pipefail
+          publish_dir="GTK_ImgsToPDF/bin/Release/net10.0/linux-x64/publish"
+          archive="GTK_ImgsToPDF-linux-x64.tar.xz"
+
+          # 保留 tar 容器（权限位、符号链接完整），压缩端换成 xz -9e 以提高压缩比。
+          # 不使用 .7z：p7zip 不保存 Unix 权限位，解压后可执行文件会丢失 +x。
+          tar -cf - -C "$publish_dir" . | xz -9e -T0 -c > "$archive"
+
+          # 校验：非空 + 归档可读
+          test -s "$archive"
+          tar -tJf "$archive" > /dev/null
+          ls -lh "$archive"
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: GTK_ImgsToPDF-linux-x64
-          path: GTK_ImgsToPDF-linux-x64.tar.gz
+          path: GTK_ImgsToPDF-linux-x64.tar.xz
           if-no-files-found: error
 
   release:
@@ -148,6 +171,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/GTK_ImgsToPDF-windows-x64.zip
-            release-assets/GTK_ImgsToPDF-linux-x64.tar.gz
+            release-assets/GTK_ImgsToPDF-windows-x64.7z
+            release-assets/GTK_ImgsToPDF-linux-x64.tar.xz
           generate_release_notes: true

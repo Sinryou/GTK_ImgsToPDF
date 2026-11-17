@@ -1,6 +1,7 @@
 using ImgsToPDF.Shared;
 using iText.IO.Image;
 using SkiaSharp;
+using System.IO.Compression;
 
 namespace ImgsToPDF.Core {
     /// <summary>
@@ -85,6 +86,25 @@ namespace ImgsToPDF.Core {
             ReadConfiguredQuality(static c => c.FastQuality, 75);
 
         /// <summary>
+        /// WebP 原始 RGB 快路径使用的 Flate 级别（1~9），取自 config.lua 的 Config.FlateLevel。
+        /// 返回 0 表示未配置或非法，交由 iText 用库默认级别压缩。
+        /// 0 必须视为「未配置」：XLua 的 CSharpCallLua 接口在 Lua 表缺少该字段时返回 default(int)，
+        /// 若把 0 传给 ZLib 会被当成「不压缩」，PDF 体积会突然膨胀到接近原始像素大小。
+        /// </summary>
+        public static int GetFlateLevel() {
+            try {
+                if (CSGlobal.luaConfig is IConfig config) {
+                    int level = config.FlateLevel;
+                    return level is >= 1 and <= 9 ? level : 0;
+                }
+            }
+            catch {
+                // Lua 配置读取异常时安全降级
+            }
+            return 0;
+        }
+
+        /// <summary>
         /// 用 SkiaSharp 解码。SKImage.FromEncodedData 会自动应用 EXIF 方向
         /// （注意 SKBitmap.Decode 不会，不要换成那个重载）。
         /// </summary>
@@ -100,7 +120,8 @@ namespace ImgsToPDF.Core {
         /// 1. iText 能直接嵌入的格式（JPEG/PNG/GIF/BMP/TIFF）→ 原始字节直通，零重编码；
         /// 2. EXIF 方向无论 2~4 还是 5~8，一律留到排版期由仿射矩阵应用 ——
         ///    不再把镜像/180° 烘焙进像素，因此不会产生任何有损重编码；
-        /// 3. WebP → iText 不认，解码后无损编码为 PNG。
+        /// 3. WebP → iText 不认，解码后把不透明像素作为原始 RGB 交给 iText 做一次 Flate 写入
+        ///    （带 alpha 的仍编码 PNG 以保留 /SMask）。
         ///
         /// --fast 模式下一律解码并按 FastQuality 重编码为 JPEG，以最大化减小体积。
         /// </summary>
@@ -138,10 +159,96 @@ namespace ImgsToPDF.Core {
                 };
             }
 
-            // WebP：iText 不认其字节，必须解码后无损编码为 PNG
+            // WebP：iText 不认其字节，必须解码。解码后不再编码 PNG 让 iText 重新解析
+            // （那是「解码 → PNG 编码 → iText 再解析 PNG」两次全像素往返），
+            // 而是把像素直接交给 iText 做一次 Flate 写入。
             using var bitmap = DecodeBitmap(File.ReadAllBytes(imagePath))
                 ?? throw new InvalidOperationException("Unsupported or corrupt image data.");
-            return new PageImage { Image = ImageDataFactory.Create(EncodePng(bitmap)) };
+
+            // 带 alpha 的图仍走 PNG：只有 PNG 能让 iText 生成 /SMask 保留透明背景
+            if (bitmap.AlphaType != SKAlphaType.Opaque) {
+                return new PageImage { Image = ImageDataFactory.Create(EncodePng(bitmap)) };
+            }
+            return new PageImage { Image = CreateRgbImage(bitmap) };
+        }
+
+        /// <summary>
+        /// 把不透明的位图作为原始 RGB 像素交给 iText：iText 只做一次 Flate 写入。
+        /// Flate 级别取自 config.lua 的 <c>Config.FlateLevel</c>（1~9）；未配置或非法时用库默认级别。
+        ///
+        /// 为什么要自己压缩：ImageData 没有逐图压缩级别入口，图像 XObject 由 PdfCanvas 内部创建，
+        /// 拿不到 PdfStream 实例；但实测 SetDeflated(true) 会让 iText 原样写入字节并保留
+        /// /Filter/FlateDecode，因此「先用 ZLib 按指定级别压好、再声明已压缩」即可控制级别。
+        /// ZLibStream 而非 DeflateStream：PDF 的 FlateDecode 要求 zlib 封装。
+        /// </summary>
+        private static ImageData CreateRgbImage(SKBitmap bitmap) {
+            byte[] rgb = ToTightRgb(bitmap);
+            int level = GetFlateLevel();
+            if (level == 0) {
+                return ImageDataFactory.Create(bitmap.Width, bitmap.Height, 3, 8, rgb, null);
+            }
+
+            using var compressed = new MemoryStream();
+            using (var zlib = new ZLibStream(
+                       compressed,
+                       new ZLibCompressionOptions { CompressionLevel = level },
+                       leaveOpen: true)) {
+                zlib.Write(rgb, 0, rgb.Length);
+            }
+
+            ImageData data = ImageDataFactory.Create(bitmap.Width, bitmap.Height, 3, 8, compressed.ToArray(), null);
+            data.SetDeflated(true);
+            return data;
+        }
+
+        /// <summary>
+        /// 把位图转成行间无 padding 的 3 字节/像素 RGB。
+        /// 命中 Rgba8888/Bgra8888 时直接按字节重排，不再额外拷贝一整幅图；
+        /// 其它颜色类型（如索引色）先转 Rgba8888 再处理。
+        /// </summary>
+        private static byte[] ToTightRgb(SKBitmap bitmap) {
+            SKBitmap? converted = null;
+            try {
+                SKBitmap source = bitmap;
+                bool packed32 = source.ColorType == SKColorType.Rgba8888 || source.ColorType == SKColorType.Bgra8888;
+
+                // 32bpp 的行宽恒为 width*4，这里仍显式校验：一旦出现行尾 padding，
+                // 按 width*4 线性读会把下一行的像素错位搬到本行末尾（静默的画面错位），
+                // 因此宁可先转一份行宽紧凑的副本。
+                if (!packed32 || source.RowBytes != source.Width * 4) {
+                    converted = source.Copy(SKColorType.Rgba8888)
+                        ?? throw new InvalidOperationException("Failed to convert image to Rgba8888.");
+                    source = converted;
+                }
+
+                bool bgra = source.ColorType == SKColorType.Bgra8888;
+                ReadOnlySpan<byte> pixels = source.GetPixelSpan();
+                byte[] rgb = new byte[checked(source.Width * source.Height * 3)];
+
+                // 平铺单层循环：s 与 d 同步单调递增，JIT 能证明 rgb[d..d+2]（上界即 rgb.Length）
+                // 与 pixels[s..s+2] 都在界内，从而消掉逐字节边界检查。
+                // 改成按行取像素（每行重算起点）会让边界检查无法消除，实测整批 WebP 慢 26%，
+                // 所以这里宁可保留一层循环，靠上面的 RowBytes 校验来保证正确性。
+                int d = 0;
+                if (bgra) {
+                    for (int s = 0; d < rgb.Length; s += 4, d += 3) {
+                        rgb[d] = pixels[s + 2];
+                        rgb[d + 1] = pixels[s + 1];
+                        rgb[d + 2] = pixels[s];
+                    }
+                }
+                else {
+                    for (int s = 0; d < rgb.Length; s += 4, d += 3) {
+                        rgb[d] = pixels[s];
+                        rgb[d + 1] = pixels[s + 1];
+                        rgb[d + 2] = pixels[s + 2];
+                    }
+                }
+                return rgb;
+            }
+            finally {
+                converted?.Dispose();
+            }
         }
 
         /// <summary>

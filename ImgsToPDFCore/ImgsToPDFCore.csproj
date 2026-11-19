@@ -11,11 +11,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <PublishProtocol>FileSystem</PublishProtocol>
     <SelfContained>true</SelfContained>
+    <!-- 移除裁剪。
+         原因：XLua.Mini 自带 IsTrimmable 标记，partial 模式下会被裁剪，而裁剪之后
+         "Lua 表 → C# 数组"的桥接会静默失效 -->
     <PublishSingleFile>True</PublishSingleFile>
-    <!-- 使用 partial 裁剪：仅裁剪显式声明了 IsTrimmable 的程序集（.NET BCL、SkiaSharp、SharpCompress 等），
-         而 ImgsToPDFCore、XLua.Mini、itext、CommandLine 会完整保留，不会破坏 XLua 反射桥接。 -->
-    <PublishTrimmed>True</PublishTrimmed>
-    <TrimMode>partial</TrimMode>
+    <PublishTrimmed>false</PublishTrimmed>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
     <AssemblyVersion>1.2.1.0</AssemblyVersion>
     <FileVersion>1.2.1.0</FileVersion>

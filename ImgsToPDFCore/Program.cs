@@ -106,6 +106,18 @@ namespace ImgsToPDF.Core {
                 CSGlobal.luaEnv.AddBuildin("lfs", XLua.LuaDLL.Lua.LoadLFS);
                 CSGlobal.luaEnv.AddBuildin("rapidjson", XLua.LuaDLL.Lua.LoadRapidJson);
 
+                // POSIX（Linux/macOS）上 Lua 内置的 package.path 只有系统目录与 "./"，
+                // 不含可执行文件所在目录；Windows 的默认模板里带 "!\\?.lua"（! 展开为 exe 目录），
+                // 因此在 Windows 上从任何目录启动都能找到 config.lua，Linux 上换个 CWD 就报
+                // "module 'config' not found" —— 同一份代码在两个平台上表现不同，原因在 Lua 的
+                // luaconf.h 默认值，不在本项目。这里把程序目录追加到搜索路径末尾（不是最前），
+                // 使 CWD 下若也有 config.lua 仍按原优先级生效，只在找不到时回落到随程序分发的那份。
+                if (!OperatingSystem.IsWindows()) {
+                    string luaHome = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar);
+                    CSGlobal.luaEnv.DoString(
+                        $"package.path = package.path .. [==[;{luaHome}/?.lua;{luaHome}/?/init.lua]==]");
+                }
+
                 CSGlobal.luaEnv.DoString(@"config = require 'config';"); // 获取lua内的方法
 
                 CSGlobal.luaConfig = CSGlobal.luaEnv.Global.Get<IConfig>("config");

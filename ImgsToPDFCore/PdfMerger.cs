@@ -31,6 +31,8 @@ namespace ImgsToPDF.Core {
 
                     using var inputPdf = new PdfDocument(new PdfReader(file));
                     inputPdf.CopyPagesTo(1, inputPdf.GetNumberOfPages(), outputPdf);
+                    // 单个文件已拷完就清掉源对象缓存，否则整批 PDF 的内容都要留到 Close() 才写盘
+                    outputPdf.FlushCopiedObjects(inputPdf);
                 }
             });
         }
@@ -58,6 +60,8 @@ namespace ImgsToPDF.Core {
 
                     // 先复制页面到输出PDF
                     inputPdf.CopyPagesTo(1, pageCount, outputPdf);
+                    // 这里不能 FlushCopiedObjects：下面的书签要用 GetPage 回取刚拷入的页，
+                    // 提前释放会让页对象取不到而抛 NullReferenceException（已实测）。
 
                     // 现在可以安全地创建书签，因为页面已经存在
                     string folderName = System.IO.Path.GetFileName(System.IO.Path.GetDirectoryName(file)) ?? string.Empty;
@@ -209,6 +213,7 @@ namespace ImgsToPDF.Core {
                     }
                     using (inputPdf) {
                         inputPdf.CopyPagesTo(1, pageCount, outputPdf);
+                        // 同上：第 3 步要用 GetPage 建书签，此处不能提前释放拷贝缓存
                     }
                 }
 

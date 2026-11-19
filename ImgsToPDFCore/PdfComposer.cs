@@ -74,8 +74,14 @@ namespace ImgsToPDF.Core {
                 pageSize = new PageSize(imageWidth, imageHeight);
             }
 
-            var canvas = new PdfCanvas(pdfDoc.AddNewPage(pageSize));
+            PdfPage page = pdfDoc.AddNewPage(pageSize);
+            var canvas = new PdfCanvas(page);
             DrawImage(canvas, pageImage, x, y, drawWidth, drawHeight);
+            // 画完立刻收尾落盘：Release 关闭内容流，Flush(true) 把本页用到的图像与内容流
+            // 一并写出并定稿。否则 iText 要到 Close() 才写盘，整本书的图片都留在内存里
+            // （实测 289 张 JPG / 93 MB：不落盘 241 MB，逐页落盘 90 MB）。
+            canvas.Release();
+            page.Flush(true);
         }
 
         /// <summary>
@@ -108,7 +114,8 @@ namespace ImgsToPDF.Core {
                 pageSize = new PageSize(contentWidth, contentHeight);
             }
 
-            var canvas = new PdfCanvas(pdfDoc.AddNewPage(pageSize));
+            PdfPage page = pdfDoc.AddNewPage(pageSize);
+            var canvas = new PdfCanvas(page);
 
             // 两张图顶部对齐，与旧版拼接位图时的画法保持一致
             DrawImage(canvas, left,
@@ -121,6 +128,10 @@ namespace ImgsToPDF.Core {
                 offsetY + (contentHeight - rightHeight) * scale,
                 rightWidth * scale,
                 rightHeight * scale);
+
+            // 收尾并逐页落盘，理由见 AddPage
+            canvas.Release();
+            page.Flush(true);
         }
 
         /// <summary>
